@@ -3,7 +3,7 @@
 ## Requirements
 
 - A Kindle supported by KOReader, with a working jailbreak and a way to launch KOReader. Follow the [official Kindle installation guide](https://github.com/koreader/koreader/wiki/Installation-on-Kindle-devices) for the appropriate package and launcher for your device.
-- Wi-Fi for aircraft and ISS updates. A power source is recommended for a continuously running desk display.
+- Wi-Fi for aircraft, ISS, and supported local rail updates. A power source is recommended for a continuously running desk display.
 
 Kindle Sky is a KOReader plugin. This repository does not bundle KOReader, a jailbreak, or a launcher.
 
@@ -15,13 +15,15 @@ Kindle Sky is a KOReader plugin. This repository does not bundle KOReader, a jai
 4. Open **Tools → Kindle Sky → Set location and refresh**. Enter your latitude and longitude in decimal degrees. The repository default, New York City, is an example. The initial radius is 40 nautical miles and the data refresh interval is 120 seconds; the shortest allowed interval is 60 seconds.
 5. Select **Time zone** and the display orientation, then choose **Start display**.
 
-If the menu entry does not appear, check that `main.lua`, `_meta.lua`, `data.lua`, `rotation.lua`, `time.lua`, and `visuals.lua` are all inside the same `kindlesky.koplugin` directory, then restart KOReader.
+If the menu entry does not appear, check that `main.lua`, `_meta.lua`, `data.lua`, `rotation.lua`, `time.lua`, `trains.lua`, and `visuals.lua` are all inside the same `kindlesky.koplugin` directory, then restart KOReader.
 
 ## Use the display
 
-The display opens on a combined Home view. It cycles through Home, Aircraft, and ISS every 90 seconds. If no aircraft are available, it skips Aircraft. **Auto-cycle views (90 s)** in the Kindle Sky menu turns automatic changes on or off.
+The display opens on a combined Home view. It cycles through Home, Aircraft, and ISS every 90 seconds, adding Trains where the saved coordinates have a supported local feed. If no aircraft are available, it skips Aircraft. **Auto-cycle views (90 s)** in the Kindle Sky menu turns automatic changes on or off.
 
-Tap a radar dot for that aircraft's details. On the Aircraft view, tap the left side to move to the next aircraft, the right side for ISS, or the header to return Home. On Home, tap the pass area for ISS. Hold anywhere to exit. Manual taps restart the automatic view timer.
+Tap a radar dot for that aircraft's details. On the Aircraft view, tap the left side to move to the next aircraft, the right side for ISS, or the header to return Home. On Home, tap the pass area for ISS. In supported regions, tap the ISS view to open Trains, then tap again to return Home. **Tools → Kindle Sky → Show nearby trains** opens that view directly. Hold anywhere to exit. Manual taps restart the automatic view timer.
+
+The saved latitude and longitude select the rail provider: SEPTA Regional Rail in the Philadelphia region, TfL rail arrivals in Greater London, and no train panel elsewhere. Changing coordinates does not detect your physical location automatically; set them again when you move. SEPTA shows approximate positions within the configured radius. London shows predictions at the nearest station within 1.5 km. See [data sources and limitations](DATA_AND_LIMITS.md).
 
 A predicted visible ISS pass within ten minutes holds the ISS view on screen until the pass ends. A newly detected aircraft emergency takes the Aircraft view for one cycle. These are on-screen changes while the app is open, not notifications that wake a sleeping Kindle.
 

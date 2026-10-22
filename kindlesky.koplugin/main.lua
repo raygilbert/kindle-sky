@@ -24,6 +24,7 @@ local Data = dofile(plugin_dir .. "data.lua")
 local Visuals = dofile(plugin_dir .. "visuals.lua")
 local Time = dofile(plugin_dir .. "time.lua")
 local Rotation = dofile(plugin_dir .. "rotation.lua")
+local Trains = dofile(plugin_dir .. "trains.lua")
 local W, H = Screen:getWidth(), Screen:getHeight()
 local BLACK, WHITE, GRAY = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_DARK_GRAY
 
@@ -117,6 +118,8 @@ function Dashboard:onSwitchView(_, ges)
         else
             app.mode = "iss"
         end
+    elseif app.mode == "iss" and app.train_provider then
+        app.mode = "trains"
     else
         app.mode = "home"
     end
@@ -139,27 +142,84 @@ function Dashboard:paintTo(bb, x, y)
     text(bb, "KINDLE SKY", 24, 18, 34, W - 48, true)
     local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
     text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
-    local mode_name = app.mode == "home" and "AT A GLANCE" or (app.mode == "aircraft" and "AIRCRAFT" or "ISS")
+    local mode_name = app.mode == "home" and "AT A GLANCE" or
+        (app.mode == "aircraft" and "AIRCRAFT" or (app.mode == "iss" and "ISS" or "TRAINS"))
     text(bb, "LOCAL  /  " .. mode_name, 24, 68, 20, 350)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
     local iss_status = (app.iss_error and "STALE " or "") .. age(app.iss_updated_at)
-    text(bb, "AIR " .. air_status .. "  ISS " .. iss_status, W > H and 465 or 310, 75, 15, W > H and 310 or 280)
+    local train_status = app.train_provider and ("  RAIL " .. (app.train_error and "STALE " or "") .. age(app.train_updated_at)) or ""
+    text(bb, "AIR " .. air_status .. "  ISS " .. iss_status .. train_status,
+        W > H and 418 or 285, 75, 15, W > H and 360 or 310)
     rule(bb, 103)
     self.radar_dots = {}
     if app.mode == "home" then
         self:paintHome(bb)
     elseif app.mode == "aircraft" then
         self:paintAircraft(bb)
+    elseif app.mode == "trains" then
+        self:paintTrains(bb)
     else
         self:paintISS(bb)
     end
     rule(bb, H - 71)
     local source = app.mode == "home" and "adsb.fi / wheretheiss.at / issinfo.net"
-        or (app.mode == "aircraft" and "https://adsb.fi" or "wheretheiss.at / issinfo.net")
+        or (app.mode == "aircraft" and "https://adsb.fi" or
+        (app.mode == "trains" and (app.train_provider == "septa" and "SEPTA Regional Rail API" or "Transport for London API")
+        or "wheretheiss.at / issinfo.net"))
     text(bb, source, 24, H - 58, 15)
     local hint = app.mode == "home" and "Tap radar: aircraft   Tap pass: ISS   Hold: exit"
-        or (app.mode == "aircraft" and "Tap left: next   Right: ISS   Header: home" or "Tap: home   Hold: exit")
+        or (app.mode == "aircraft" and "Tap left: next   Right: ISS   Header: home"
+        or (app.mode == "iss" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))
     text(bb, hint, 24, H - 33, 16)
+end
+
+function Dashboard:paintTrains(bb)
+    local app, provider, trains = self.owner, self.owner.train_provider, self.owner.trains
+    local wide = W > H
+    if provider == "septa" then
+        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - 48, true)
+        text(bb, string.format("%d trains within %d nm  /  positions approximate", #(trains or {}),
+            app.settings.radius_nm), 24, 165, 18, W - 48)
+        if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
+        if not trains then
+            text(bb, "Waiting for nearby trains", 24, 245, 24, W - 48)
+        elseif #trains == 0 then
+            text(bb, "No Regional Rail trains in range", 24, 245, 24, W - 48)
+        else
+            local count = math.min(#trains, wide and 4 or 6)
+            for i = 1, count do
+                local train, y = trains[i], 215 + (i - 1) * (wide and 75 or 85)
+                text(bb, "#" .. train.number .. "  " .. train.line, 24, y, 23, W - 48, true)
+                text(bb, string.format("To %s  /  %.1f nm  /  %s",
+                    train.destination, train.distance_nm,
+                    train.delay and (train.delay > 0 and train.delay .. " min late" or "on time") or "delay unknown"),
+                    24, y + 29, 18, W - 48)
+                if train.next_stop ~= "" and wide then
+                    text(bb, "Next: " .. train.next_stop, 24, y + 52, 16, W - 48)
+                end
+            end
+        end
+    else
+        local stop = app.train_stop
+        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - 48, true)
+        text(bb, stop and (stop.name .. string.format("  /  %.1f km away", stop.distance_km))
+            or "Finding the nearest station", 24, 165, 19, W - 48)
+        if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
+        if not trains then
+            text(bb, "Waiting for arrival predictions", 24, 245, 24, W - 48)
+        elseif #trains == 0 then
+            text(bb, "No predicted arrivals at this station", 24, 245, 22, W - 48)
+        else
+            local count = math.min(#trains, wide and 5 or 7)
+            for i = 1, count do
+                local train, y = trains[i], 215 + (i - 1) * (wide and 61 or 70)
+                text(bb, string.format("%2d min  %s", train.minutes, train.line), 24, y, 22, W - 48, true)
+                text(bb, "To " .. train.destination ..
+                    (train.platform ~= "" and ("  /  " .. train.platform) or ""), 24, y + 27, 18, W - 48)
+            end
+        end
+        text(bb, "Station predictions, not train positions", 24, H - 100, 17, W - 48)
+    end
 end
 
 function Dashboard:paintRadar(bb, ac, cx, cy, radius, range_nm, selected_index)
@@ -494,6 +554,8 @@ function Sky:rotateView()
         end
     elseif self.mode == "aircraft" then
         self.mode = "iss"
+    elseif self.mode == "iss" and self.train_provider then
+        self.mode = "trains"
     else
         self.mode = "home"
     end
@@ -520,6 +582,8 @@ function Sky:start()
     self.emergency_hold_until = nil
     self.aircraft_error = "Waiting for Wi-Fi"
     self.iss_error = "Waiting for Wi-Fi"
+    self.train_provider = Trains.provider(self.settings.lat, self.settings.lon)
+    self.train_error = self.train_provider and "Waiting for Wi-Fi" or nil
     self.dashboard = Dashboard:new { owner = self }
     UIManager:show(self.dashboard)
     UIManager:preventStandby()
@@ -563,8 +627,10 @@ function Sky:refresh()
         self.aircraft_error = "Wi-Fi offline"
         self.iss_error = "Wi-Fi offline"
         self.pass_error = "Wi-Fi offline"
+        if self.train_provider then self.train_error = "Wi-Fi offline" end
         if not self.aircraft_updated_at or os.time() - self.aircraft_updated_at > 600 then self.aircraft = nil end
         if not self.iss_updated_at or os.time() - self.iss_updated_at > 600 then self.iss = nil end
+        if not self.train_updated_at or os.time() - self.train_updated_at > 600 then self.trains = nil end
         if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
     end
     NetworkMgr:runWhenConnected(function()
@@ -632,6 +698,34 @@ function Sky:refresh()
         elseif self.next_pass then
             self.pass_error = nil
         end
+        if self.train_provider == "septa" then
+            local response, request_error = get_json("https://www3.septa.org/api/TrainView/index.php")
+            if response then
+                self.trains = Trains.septa(response, lat, lon, self.settings.radius_nm)
+                self.train_updated_at, self.train_error = os.time(), nil
+            else
+                self.train_error = request_error or "Train data unavailable"
+            end
+        elseif self.train_provider == "tfl" then
+            if not self.train_stop and (not self.train_stop_checked_at or os.time() - self.train_stop_checked_at > 3600) then
+                local stops, request_error = get_json(Trains.stopUrl(lat, lon))
+                self.train_stop_checked_at = os.time()
+                self.train_stop = stops and Trains.closestStop(stops, lat, lon) or nil
+                if not self.train_stop then self.train_error = request_error or "No rail station within 1.5 km" end
+            end
+            if self.train_stop then
+                local arrivals, request_error = get_json("https://api.tfl.gov.uk/StopPoint/" .. self.train_stop.id .. "/Arrivals")
+                if arrivals then
+                    self.trains = Trains.tfl(arrivals)
+                    self.train_updated_at, self.train_error = os.time(), nil
+                else
+                    self.train_error = request_error or "Arrival predictions unavailable"
+                end
+            end
+        end
+        if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
+            self.trains = nil
+        end
         if self.next_pass then
             self.next_pass.minutes = math.max(0, math.ceil((self.next_pass.start - os.time()) / 60))
             self.next_pass.active = self.next_pass.start <= os.time() and os.time() <= self.next_pass.finish
@@ -688,6 +782,11 @@ function Sky:configure()
                 self.settings = { lat = lat, lon = lon, radius_nm = math.floor(radius),
                     refresh_seconds = math.floor(interval), landscape = self.settings.landscape,
                     auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone }
+                self.train_provider = Trains.provider(lat, lon)
+                self.train_stop, self.train_stop_checked_at = nil, nil
+                self.trains, self.train_updated_at = nil, nil
+                self.train_error = self.train_provider and "Waiting for Wi-Fi" or nil
+                if not self.train_provider and self.mode == "trains" then self.mode = "home" end
                 self:saveSettings()
                 UIManager:close(dialog)
                 if self.running then self:refresh() end
@@ -728,6 +827,14 @@ function Sky:addToMainMenu(menu_items)
                   self:scheduleRotation()
               end },
             { text = _("Set location and refresh"), callback = function() self:configure() end },
+            { text = _("Show nearby trains"), enabled_func = function()
+                  return Trains.provider(self.settings.lat, self.settings.lon) ~= nil
+              end, callback = function()
+                  if not self.running then self:start() end
+                  self.mode = "trains"
+                  self:scheduleRotation()
+                  if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+              end },
             { text = _("Time zone"), sub_item_table = timezone_items },
         },
     }
