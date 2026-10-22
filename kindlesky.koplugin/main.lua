@@ -176,10 +176,12 @@ end
 function Dashboard:paintTrains(bb)
     local app, provider, trains = self.owner, self.owner.train_provider, self.owner.trains
     local wide = W > H
+    Visuals.paintTrain(bb, W - (wide and 268 or 208), 128, wide and 244 or 184, 61,
+        provider, BLACK, WHITE)
     if provider == "septa" then
-        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - 48, true)
+        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - (wide and 284 or 224), true)
         text(bb, string.format("%d trains within %d nm  /  positions approximate", #(trains or {}),
-            app.settings.radius_nm), 24, 165, 18, W - 48)
+            app.settings.radius_nm), 24, 165, 18, W - (wide and 284 or 224))
         if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
         if not trains then
             text(bb, "Waiting for nearby trains", 24, 245, 24, W - 48)
@@ -201,9 +203,9 @@ function Dashboard:paintTrains(bb)
         end
     else
         local stop = app.train_stop
-        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - 48, true)
+        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - (wide and 284 or 224), true)
         text(bb, stop and (stop.name .. string.format("  /  %.1f km away", stop.distance_km))
-            or "Finding the nearest station", 24, 165, 19, W - 48)
+            or "Finding the nearest station", 24, 165, 19, W - (wide and 284 or 224))
         if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
         if not trains then
             text(bb, "Waiting for arrival predictions", 24, 245, 24, W - 48)
@@ -268,7 +270,7 @@ function Dashboard:paintHome(bb)
         local name = first.flight ~= "" and first.flight or (first.registration ~= "" and first.registration or first.id)
         local visual_x, visual_y = landscape and 650 or 440, landscape and 160 or 453
         local visual_w, visual_h = landscape and 110 or 110, landscape and 47 or 60
-        local visual_label = Visuals.paintAircraft(bb, visual_x, visual_y, visual_w, visual_h, first, BLACK)
+        local visual_label = Visuals.paintAircraft(bb, visual_x, visual_y, visual_w, visual_h, first, BLACK, WHITE)
         text(bb, visual_label, visual_x - 8, visual_y + visual_h + 2, 15, 130)
         text(bb, name, tx, top + 37, landscape and 38 or 34, landscape and 225 or 390, true)
         text(bb, (first.model ~= "" and first.model or "Unknown type") .. "  " .. first.registration,
@@ -333,7 +335,7 @@ function Dashboard:paintAircraft(bb)
     end
     rule(bb, 412)
     if first then
-        local label = Visuals.paintAircraft(bb, 100, 432, 400, 91, first, BLACK)
+        local label = Visuals.paintAircraft(bb, 100, 432, 400, 91, first, BLACK, WHITE)
         text(bb, label .. " / representative shape", 24, 527, 16, W - 48)
     end
     text(bb, "RADAR", 24, 556, 17, W - 48, true)
@@ -365,7 +367,7 @@ function Dashboard:paintAircraftLandscape(bb)
     bb:paintRect(391, 122, 2, 383, GRAY)
     text(bb, "WHAT IT LOOKS LIKE", 421, 126, 19, 350, true)
     if first then
-        local label = Visuals.paintAircraft(bb, 446, 158, 292, 111, first, BLACK)
+        local label = Visuals.paintAircraft(bb, 446, 158, 292, 111, first, BLACK, WHITE)
         text(bb, label .. " / representative shape", 421, 273, 17, 350)
     end
     text(bb, "NEARBY RADAR", 421, 306, 18, 350, true)

@@ -7,9 +7,9 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 ## What you see
 
 - A home view with nearby aircraft, radar, a featured aircraft, and the next predicted visible ISS pass.
-- Aircraft details with reported callsign, type, registration, distance, bearing, altitude, speed, and a **representative** monochrome silhouette. The silhouette shows a broad aircraft category; it is not a photo or an exact depiction of that registration.
+- Aircraft details with reported callsign, type, registration, distance, bearing, altitude, speed, and a **representative** monochrome silhouette. Distinct outlines include widebody jets, airliners, business jets, light prop planes, turboprops, fighters, and helicopters. The silhouette is not a photo or an exact depiction of that registration.
 - An ISS view with current position, local sky direction and elevation, a solar-array diagram, and the next predicted visible pass.
-- A location-dependent train view: approximate SEPTA Regional Rail train positions near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
+- A location-dependent train view with a simple railcar diagram: approximate SEPTA Regional Rail train positions near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
 - Automatic Home → Aircraft → ISS → Trains view changes every 90 seconds where a train feed is supported. When several aircraft are nearby, Aircraft turns favor emergency, reported military, and selected unusual types while avoiding consecutive repeats where possible. A newly detected emergency opens its detail view immediately.
 - Data-age and **STALE** indicators when a feed stops updating. The display keeps the Kindle awake while it runs and restores normal sleep behavior when closed.
 
