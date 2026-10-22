@@ -699,7 +699,8 @@ end
 
 function Sky:addToMainMenu(menu_items)
     local timezone_items = {}
-    for _, zone in ipairs(Time.zones) do
+    -- Do not name the loop index "_": it would shadow the gettext function used below.
+    for _index, zone in ipairs(Time.zones) do
         timezone_items[#timezone_items + 1] = {
             text = _(zone.label),
             checked_func = function() return self.settings.timezone == zone.id end,
