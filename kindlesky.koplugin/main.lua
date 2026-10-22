@@ -65,16 +65,16 @@ local function age(ts)
     return seconds < 60 and (seconds .. "s") or (math.floor(seconds / 60) .. "m")
 end
 
-local function pass_time(ts)
+local function pass_time(ts, timezone)
     if not ts then return "--" end
-    local display, zone = Time.formatEastern(ts, "%a %I:%M %p")
+    local display, zone = Time.format(ts, "%a %I:%M %p", timezone)
     return display:gsub(" 0", " ") .. " " .. zone
 end
 
-local function pass_headline(pass)
-    if pass.active then return "NOW  /  " .. pass_time(pass.start) end
-    if pass.minutes <= 60 then return "IN " .. pass.minutes .. " MIN  /  " .. pass_time(pass.start) end
-    return pass_time(pass.start)
+local function pass_headline(pass, timezone)
+    if pass.active then return "NOW  /  " .. pass_time(pass.start, timezone) end
+    if pass.minutes <= 60 then return "IN " .. pass.minutes .. " MIN  /  " .. pass_time(pass.start, timezone) end
+    return pass_time(pass.start, timezone)
 end
 
 local Dashboard = InputContainer:extend {}
@@ -137,8 +137,8 @@ function Dashboard:paintTo(bb, x, y)
     local app = self.owner
     bb:paintRect(x, y, W, H, WHITE)
     text(bb, "KINDLE SKY", 24, 18, 34, W - 48, true)
-    local clock = Time.formatEastern(os.time(), "%I:%M %p")
-    text(bb, clock:gsub("^0", "") .. " ET", W - 155, 25, 20, 135, true)
+    local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
+    text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
     local mode_name = app.mode == "home" and "AT A GLANCE" or (app.mode == "aircraft" and "AIRCRAFT" or "ISS")
     text(bb, "LOCAL  /  " .. mode_name, 24, 68, 20, 350)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
@@ -238,7 +238,7 @@ function Dashboard:paintHome(bb)
     Visuals.paintISS(bb, landscape and 647 or 450, divider + (landscape and 30 or 28),
         landscape and 110 or 105, landscape and 53 or 44, BLACK, WHITE)
     if pass then
-        text(bb, pass_headline(pass), 24, divider + 46, landscape and 30 or 25,
+        text(bb, pass_headline(pass, app.settings.timezone), 24, divider + 46, landscape and 30 or 25,
             landscape and 590 or 410, true)
         text(bb, string.format("Look %s to %s  /  peaks at %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0),
             24, divider + (landscape and 87 or 78), landscape and 21 or 18,
@@ -356,7 +356,7 @@ function Dashboard:paintISS(bb)
     rule(bb, 575)
     text(bb, "NEXT VISIBLE PASS", 24, 590, 18, W - 48, true)
     if pass then
-        text(bb, pass_headline(pass), 24, 623, 28, W - 48, true)
+        text(bb, pass_headline(pass, app.settings.timezone), 24, 623, 28, W - 48, true)
         text(bb, string.format("%s to %s  /  max %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0), 24, 671, 21)
     else
         text(bb, app.pass_error or "No visible pass in 10 days", 24, 632, 21)
@@ -387,7 +387,7 @@ function Dashboard:paintISSLandscape(bb)
     rule(bb, 392)
     text(bb, "NEXT VISIBLE PASS", 24, 409, 19, W - 48, true)
     if pass then
-        text(bb, pass_headline(pass), 24, 440, 25, 380, true)
+        text(bb, pass_headline(pass, app.settings.timezone), 24, 440, 25, 380, true)
         text(bb, string.format("%s to %s  /  max %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0), 421, 451, 21, 350)
     else
         text(bb, app.pass_error or "No visible pass in 10 days", 24, 450, 21, W - 48)
@@ -397,7 +397,7 @@ end
 local Sky = WidgetContainer:extend { name = "kindlesky", is_doc_only = false }
 -- Public example location: New York City. Set your own location in the plugin menu.
 local defaults = { lat = 40.7128, lon = -74.0060, radius_nm = 40, refresh_seconds = 120,
-    landscape = true, auto_rotate = true }
+    landscape = true, auto_rotate = true, timezone = "auto" }
 local ROTATE_SECONDS = 90
 
 local function get_json(url)
@@ -425,6 +425,7 @@ function Sky:init()
     self.settings = self.settings_file:readSetting("settings") or defaults
     if self.settings.landscape == nil then self.settings.landscape = true end
     if self.settings.auto_rotate == nil then self.settings.auto_rotate = true end
+    if not Time.isValidZone(self.settings.timezone) then self.settings.timezone = "auto" end
     self.mode = "home"
     self.selected_index = 1
     self.rotation_state = {}
@@ -686,7 +687,7 @@ function Sky:configure()
                 end
                 self.settings = { lat = lat, lon = lon, radius_nm = math.floor(radius),
                     refresh_seconds = math.floor(interval), landscape = self.settings.landscape,
-                    auto_rotate = self.settings.auto_rotate }
+                    auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone }
                 self:saveSettings()
                 UIManager:close(dialog)
                 if self.running then self:refresh() end
@@ -697,6 +698,18 @@ function Sky:configure()
 end
 
 function Sky:addToMainMenu(menu_items)
+    local timezone_items = {}
+    for _, zone in ipairs(Time.zones) do
+        timezone_items[#timezone_items + 1] = {
+            text = _(zone.label),
+            checked_func = function() return self.settings.timezone == zone.id end,
+            callback = function()
+                self.settings.timezone = zone.id
+                self:saveSettings()
+                if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+            end,
+        }
+    end
     menu_items.kindlesky = {
         text = _("Kindle Sky"),
         sorting_hint = "tools",
@@ -714,6 +727,7 @@ function Sky:addToMainMenu(menu_items)
                   self:scheduleRotation()
               end },
             { text = _("Set location and refresh"), callback = function() self:configure() end },
+            { text = _("Time zone"), sub_item_table = timezone_items },
         },
     }
 end

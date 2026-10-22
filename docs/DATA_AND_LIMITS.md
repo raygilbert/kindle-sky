@@ -12,6 +12,6 @@ Aircraft positions and metadata can be missing, stale, or wrong. The "reported m
 
 Kindle Sky sends the configured latitude and longitude to adsb.fi and issinfo.net in API requests. It sends no account credentials and has no project-operated server. If a request fails, previously received data is marked **STALE** and aircraft or ISS positions are removed after ten minutes without an update.
 
-The plugin's LuaSec requests on the older tested Kindle currently run without TLS certificate verification. These requests fetch public display data; they should not be treated as authenticated alerts. The clock and pass labels are currently fixed to Eastern time. The display does not wake a sleeping Kindle to announce a pass.
+The plugin's LuaSec requests on the older tested Kindle currently run without TLS certificate verification. These requests fetch public display data; they should not be treated as authenticated alerts. The clock and pass labels use the selected time zone; Auto falls back to Eastern when KOReader reports UTC. The display does not wake a sleeping Kindle to announce a pass.
 
 KOReader is a separate project; install it from its [official release and installation documentation](https://github.com/koreader/koreader). The plugin does not include KOReader binaries or a launcher. The project's e-ink diagrams and plugin logic were created for Kindle Sky, inspired by the [original desk-display idea](https://www.reddit.com/r/eink/comments/1xbw3xi/i_built_an_epaper_desk_display_that_shows_nearby/).

@@ -13,7 +13,7 @@ Kindle Sky is a KOReader plugin. This repository does not bundle KOReader, a jai
 2. Copy the complete `kindlesky.koplugin` directory into the Kindle's `koreader/plugins/` directory. On the Kindle, that path is normally `/mnt/us/koreader/plugins/kindlesky.koplugin/`.
 3. Safely eject the Kindle, unplug it, and restart KOReader.
 4. Open **Tools → Kindle Sky → Set location and refresh**. Enter your latitude and longitude in decimal degrees. The repository default, New York City, is an example. The initial radius is 40 nautical miles and the data refresh interval is 120 seconds; the shortest allowed interval is 60 seconds.
-5. Select the display orientation and choose **Start display**.
+5. Select **Time zone** and the display orientation, then choose **Start display**.
 
 If the menu entry does not appear, check that `main.lua`, `_meta.lua`, `data.lua`, `rotation.lua`, `time.lua`, and `visuals.lua` are all inside the same `kindlesky.koplugin` directory, then restart KOReader.
 
@@ -29,4 +29,6 @@ Kindle Sky requests that the device stay awake while its display is open and res
 
 ## Time zone
 
-The header clock and predicted pass times currently display Eastern time, including EST/EDT transitions. Changing the latitude and longitude does not change the display time zone. If your Kindle is elsewhere, adapt `time.lua` before relying on the displayed local time.
+The header clock and predicted pass times use the same setting under **Tools → Kindle Sky → Time zone**. **Auto** uses the device's zone when KOReader reports a non-UTC zone. If KOReader reports UTC, Auto falls back to Eastern to avoid the UTC clock seen on some Kindle launchers. Choose **Device time zone** to use the device setting exactly, including UTC. You can also select Eastern, Central, Mountain, Pacific, Alaska, Arizona, Hawaii, or UTC directly. The North American choices handle their daylight-saving transitions; Arizona and Hawaii stay on standard time. Changing the latitude and longitude does not change this setting.
+
+On a Kindle whose native clock is local but KOReader reports UTC, choose your time zone explicitly. The clock is based on the Kindle's system time, so an incorrect device date or time will still produce an incorrect display.

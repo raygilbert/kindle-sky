@@ -1,6 +1,30 @@
--- Format the display's clock and ISS pass times for Eastern time.
--- Kindle/KOReader may run with TZ=UTC even when the user's wall clock is Eastern.
+-- KOReader can inherit UTC even when the Kindle's native clock shows local time.
+-- Keep a portable fallback for North American zones instead of changing process TZ.
 local Time = {}
+
+Time.zones = {
+    { id = "auto", label = "Auto (device, then Eastern)" },
+    { id = "device", label = "Device time zone" },
+    { id = "America/New_York", label = "Eastern" },
+    { id = "America/Chicago", label = "Central" },
+    { id = "America/Denver", label = "Mountain" },
+    { id = "America/Los_Angeles", label = "Pacific" },
+    { id = "America/Anchorage", label = "Alaska" },
+    { id = "America/Phoenix", label = "Arizona" },
+    { id = "Pacific/Honolulu", label = "Hawaii" },
+    { id = "UTC", label = "UTC" },
+}
+
+local zone_rules = {
+    ["America/New_York"] = { -5, "EST", "EDT" },
+    ["America/Chicago"] = { -6, "CST", "CDT" },
+    ["America/Denver"] = { -7, "MST", "MDT" },
+    ["America/Los_Angeles"] = { -8, "PST", "PDT" },
+    ["America/Anchorage"] = { -9, "AKST", "AKDT" },
+    ["America/Phoenix"] = { -7, "MST" },
+    ["Pacific/Honolulu"] = { -10, "HST" },
+    UTC = { 0, "UTC" },
+}
 
 local month_offsets = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
 
@@ -10,20 +34,49 @@ local function weekday(year, month, day)
         + math.floor(year / 400) + month_offsets[month] + day) % 7
 end
 
-local function eastern_offset(timestamp)
+local function uses_daylight(timestamp, base_offset)
     local utc = os.date("!*t", timestamp)
-    local month, day, hour = utc.month, utc.day, utc.hour
     local march_sunday = 8 + (7 - weekday(utc.year, 3, 1)) % 7
     local november_sunday = 1 + (7 - weekday(utc.year, 11, 1)) % 7
-    local summer = month > 3 and month < 11
-        or month == 3 and (day > march_sunday or day == march_sunday and hour >= 7)
-        or month == 11 and (day < november_sunday or day == november_sunday and hour < 6)
-    return summer and -4 * 3600 or -5 * 3600, summer and "EDT" or "EST"
+    -- US daylight time starts at 02:00 standard time and ends at 02:00 daylight time.
+    local march_start = 2 - base_offset
+    local november_end = 2 - (base_offset + 1)
+    if utc.month > 3 and utc.month < 11 then return true end
+    if utc.month == 3 then
+        return utc.day > march_sunday or utc.day == march_sunday and utc.hour >= march_start
+    end
+    if utc.month == 11 then
+        return utc.day < november_sunday or utc.day == november_sunday and utc.hour < november_end
+    end
+    return false
 end
 
-function Time.formatEastern(timestamp, format)
-    local offset, zone = eastern_offset(timestamp)
-    return os.date("!" .. format, timestamp + offset), zone
+local function device_zone(timestamp)
+    local zone = os.date("%Z", timestamp)
+    if not zone or zone == "" then zone = os.date("%z", timestamp) end
+    return zone ~= "" and zone or "LOCAL"
+end
+
+function Time.isValidZone(zone)
+    return zone == "auto" or zone == "device" or zone_rules[zone] ~= nil
+end
+
+function Time.format(timestamp, format, selected_zone)
+    local zone = selected_zone or "auto"
+    if zone == "auto" then
+        local device_name = device_zone(timestamp)
+        local device_offset = os.date("%z", timestamp)
+        -- Some Kindle launchers leave KOReader in UTC despite the native clock.
+        zone = (device_name == "UTC" or device_name == "GMT" or device_offset == "+0000")
+            and "America/New_York" or "device"
+    end
+    if zone == "device" then
+        return os.date(format, timestamp), device_zone(timestamp)
+    end
+    local rule = zone_rules[zone] or zone_rules["America/New_York"]
+    local daylight = rule[3] and uses_daylight(timestamp, rule[1])
+    local offset = rule[1] + (daylight and 1 or 0)
+    return os.date("!" .. format, timestamp + offset * 3600), daylight and rule[3] or rule[2]
 end
 
 return Time
