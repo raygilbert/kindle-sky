@@ -22,36 +22,39 @@ local rare_types = { A388=true, A225=true, A124=true, A337=true, A342=true, B748
 
 function Data.aircraft(response, lat, lon, radius_nm)
     local found = {}
-    local list = response and (response.ac or response.aircraft) or {}
+    local list = type(response) == "table" and (response.ac or response.aircraft) or {}
+    if type(list) ~= "table" then return found end
     for _, ac in ipairs(list) do
-        local alat, alon = tonumber(ac.lat), tonumber(ac.lon)
-        local seen = tonumber(ac.seen_pos or ac.seen or 999)
-        if alat and alon and seen <= 120 then
-            local km = Data.distance_km(lat, lon, alat, alon)
-            local nm = km / 1.852
-            if nm <= radius_nm then
-                local model = tostring(ac.t or ac.type or "")
-                local squawk = tostring(ac.squawk or "")
-                local flags = tonumber(ac.dbFlags) or 0
-                local military = flags % 2 == 1
-                local emergency = squawk == "7700" or squawk == "7600" or squawk == "7500"
-                local rare = emergency or military or rare_types[model] or false
-                found[#found + 1] = {
-                    id = tostring(ac.hex or ""),
-                    flight = tostring(ac.flight or ""):gsub("%s+$", ""),
-                    registration = tostring(ac.r or ""),
-                    model = model,
-                    description = tostring(ac.desc or ""),
-                    altitude_ft = ac.alt_baro == "ground" and 0 or tonumber(ac.alt_baro or ac.alt_geom),
-                    speed_kt = tonumber(ac.gs),
-                    heading = tonumber(ac.track),
-                    distance_nm = nm,
-                    bearing = Data.bearing(lat, lon, alat, alon),
-                    emergency = emergency,
-                    military = military,
-                    rare = rare,
-                    squawk = squawk,
-                }
+        if type(ac) == "table" then
+            local alat, alon = tonumber(ac.lat), tonumber(ac.lon)
+            local seen = tonumber(ac.seen_pos or ac.seen or 999)
+            if alat and alon and seen and seen <= 120 then
+                local km = Data.distance_km(lat, lon, alat, alon)
+                local nm = km / 1.852
+                if nm <= radius_nm then
+                    local model = tostring(ac.t or ac.type or "")
+                    local squawk = tostring(ac.squawk or "")
+                    local flags = tonumber(ac.dbFlags) or 0
+                    local military = flags % 2 == 1
+                    local emergency = squawk == "7700" or squawk == "7600" or squawk == "7500"
+                    local rare = emergency or military or rare_types[model] or false
+                    found[#found + 1] = {
+                        id = tostring(ac.hex or ""),
+                        flight = tostring(ac.flight or ""):gsub("%s+$", ""),
+                        registration = tostring(ac.r or ""),
+                        model = model,
+                        description = tostring(ac.desc or ""),
+                        altitude_ft = ac.alt_baro == "ground" and 0 or tonumber(ac.alt_baro or ac.alt_geom),
+                        speed_kt = tonumber(ac.gs),
+                        heading = tonumber(ac.track),
+                        distance_nm = nm,
+                        bearing = Data.bearing(lat, lon, alat, alon),
+                        emergency = emergency,
+                        military = military,
+                        rare = rare,
+                        squawk = squawk,
+                    }
+                end
             end
         end
     end
@@ -63,7 +66,7 @@ function Data.aircraft(response, lat, lon, radius_nm)
 end
 
 function Data.iss(response, lat, lon)
-    if not response or not tonumber(response.latitude) or not tonumber(response.longitude) then return nil end
+    if type(response) ~= "table" or not tonumber(response.latitude) or not tonumber(response.longitude) then return nil end
     local ilat, ilon = tonumber(response.latitude), tonumber(response.longitude)
     local altitude = tonumber(response.altitude) or 0
     local ground_distance = Data.distance_km(lat, lon, ilat, ilon)
@@ -83,8 +86,8 @@ function Data.iss(response, lat, lon)
 end
 
 function Data.pass(response, now)
-    local p = response and response.pass
-    if not p or not tonumber(p.startUTC) then return nil end
+    local p = type(response) == "table" and response.pass
+    if type(p) ~= "table" or not tonumber(p.startUTC) then return nil end
     local start = tonumber(p.startUTC)
     local finish = tonumber(p.endUTC) or start + 600
     if finish < now then return nil end

@@ -22,6 +22,8 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 
 See [installation and controls](docs/INSTALLATION.md) for the complete setup and [data sources and limitations](docs/DATA_AND_LIMITS.md) before using the feeds.
 
+Keep your own coordinates and Kindle settings out of public issues and pull requests. The public source contains example coordinates; installed settings live on the device. HTTPS requests verify certificate chains using KOReader's CA bundle, but the bundled LuaSec build does not verify hostnames. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for the security boundary.
+
 ## Current scope
 
 Kindle Sky has been tested on one older Kindle with KOReader. Other models and firmware versions may need layout or launch adjustments. The clock and ISS pass labels use the selected time zone. **Auto** uses the device zone when KOReader reports a non-UTC zone, then falls back to Eastern; change it in the menu if that does not match your location. The train feed uses the saved coordinates; it does not detect where the Kindle is physically located. Aircraft, satellite, and SEPTA train positions are approximate. TfL data is station arrival predictions, not train positions. Pass alerts appear only while Kindle Sky is open.

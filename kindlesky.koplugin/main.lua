@@ -461,22 +461,39 @@ local Sky = WidgetContainer:extend { name = "kindlesky", is_doc_only = false }
 local defaults = { lat = 40.7128, lon = -74.0060, radius_nm = 40, refresh_seconds = 120,
     landscape = true, auto_rotate = true, timezone = "auto" }
 local ROTATE_SECONDS = 90
+local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+local CA_BUNDLE = DataStorage:getFullDataDir() .. "/data/ca-bundle.crt"
 
 local function get_json(url)
     local chunks = {}
+    local ca_file = io.open(CA_BUNDLE, "rb")
+    if not ca_file then return nil, "CA bundle unavailable" end
+    ca_file:close()
+    local bytes = 0
     socketutil:set_timeout(8, 15)
+    local table_sink = socketutil.table_sink(chunks)
+    local function limited_sink(chunk, err)
+        if chunk then
+            bytes = bytes + #chunk
+            if bytes > MAX_RESPONSE_BYTES then return nil, "Response too large" end
+        end
+        return table_sink(chunk, err)
+    end
     local called, ok, code = pcall(https.request, {
         url = url,
         method = "GET",
-        sink = socketutil.table_sink(chunks),
+        sink = limited_sink,
         headers = { ["User-Agent"] = "KindleSky/0.3 (personal e-ink display)" },
         protocol = "any",
-        options = { "all", "no_sslv2", "no_sslv3" },
-        verify = "none", -- Public display data; see README for the TLS limitation.
+        options = { "all", "no_sslv2", "no_sslv3", "no_tlsv1" },
+        verify = "peer",
+        cafile = CA_BUNDLE,
+        redirect = false,
     })
     socketutil:reset_timeout()
     if not called then return nil, "Network request failed" end
-    if ok ~= 1 or code ~= 200 then return nil, "HTTP " .. tostring(code) end
+    if ok ~= 1 then return nil, tostring(code or "Request failed") end
+    if code ~= 200 then return nil, "HTTP " .. tostring(code) end
     local valid, value = pcall(JSON.decode, table.concat(chunks))
     if not valid or type(value) ~= "table" then return nil, "Invalid response" end
     return value
