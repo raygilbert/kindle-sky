@@ -128,7 +128,7 @@ end
 function Dashboard:paintTo(bb, x, y)
     local app = self.owner
     bb:paintRect(x, y, W, H, WHITE)
-    text(bb, "KINDLE SKY", 24, 18, 34, W - 48, true)
+    text(bb, "KINDLE HORIZON", 24, 18, 34, W - 48, true)
     local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
     text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
     local mode_name = app.mode == "home" and "AT A GLANCE" or
@@ -763,7 +763,7 @@ end
 function Sky:configure()
     local dialog
     dialog = MultiInputDialog:new {
-        title = _("Kindle Sky location and refresh"),
+        title = _("Kindle Horizon location and refresh"),
         fields = {
             { text = tostring(self.settings.lat), hint = _("Latitude"), input_type = "number" },
             { text = tostring(self.settings.lon), hint = _("Longitude"), input_type = "number" },
@@ -814,7 +814,7 @@ function Sky:addToMainMenu(menu_items)
         }
     end
     menu_items.kindlesky = {
-        text = _("Kindle Sky"),
+        text = _("Kindle Horizon"),
         sorting_hint = "tools",
         sub_item_table = {
             { text = _("Start display"), callback = function() self:start() end },

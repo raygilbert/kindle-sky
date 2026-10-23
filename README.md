@@ -1,8 +1,8 @@
-# Kindle Sky
+# Kindle Horizon
 
-Kindle Sky turns a jailbroken Kindle running [KOReader](https://github.com/koreader/koreader) into an e-ink desk display for nearby aircraft, satellites above your saved location, and supported local rail feeds. It runs on the Kindle itself; no companion computer is needed after installation. Wi-Fi is required for live data.
+Kindle Horizon turns a jailbroken Kindle running [KOReader](https://github.com/koreader/koreader) into an e-ink desk display for nearby aircraft, satellites above your saved location, and supported local rail feeds. It runs on the Kindle itself; no companion computer is needed after installation. Wi-Fi is required for live data.
 
-The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/eink/comments/1xbw3xi/i_built_an_epaper_desk_display_that_shows_nearby/). Kindle Sky is an independent KOReader plugin, not a port of that project's code.
+The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/eink/comments/1xbw3xi/i_built_an_epaper_desk_display_that_shows_nearby/). Kindle Horizon is an independent KOReader plugin, not a port of that project's code.
 
 ## What you see
 
@@ -17,7 +17,8 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 
 1. Install KOReader on a supported, jailbroken Kindle using [KOReader's Kindle guide](https://github.com/koreader/koreader/wiki/Installation-on-Kindle-devices).
 2. Copy the `kindlesky.koplugin` folder from this repository into `koreader/plugins/` on the Kindle USB drive. Restart KOReader.
-3. Open **Tools → Kindle Sky → Set location and refresh**. Enter your own latitude and longitude before starting. The source ships with **New York City example coordinates**, not your location.
+   The plugin folder and saved settings retain the `kindlesky` name for compatibility with existing installations. Do not rename that folder.
+3. Open **Tools → Kindle Horizon → Set location and refresh**. Enter your own latitude and longitude before starting. The source ships with **New York City example coordinates**, not your location.
 4. Choose **Time zone** if you want a specific local clock, choose **Landscape display** or **Portrait display**, then **Start display**. Tap the radar or aircraft area for aircraft details, tap the satellite area for the sky map, tap the satellite view for trains where supported, and hold the screen to exit. **Show nearby trains** opens the rail view directly when your saved location has a supported feed.
 
 See [installation and controls](docs/INSTALLATION.md) for the complete setup and [data sources and limitations](docs/DATA_AND_LIMITS.md) before using the feeds.
@@ -26,10 +27,10 @@ Keep your own coordinates and Kindle settings out of public issues and pull requ
 
 ## Current scope
 
-Kindle Sky has been tested on one older Kindle with KOReader. Other models and firmware versions may need layout or launch adjustments. **Auto** uses the device zone when KOReader reports a non-UTC zone, then falls back to Eastern; change it in the menu if that does not match your location. The aircraft, satellite, and train views use saved coordinates; the Kindle does not detect its physical location. Satellite directions and SEPTA train positions are approximate. TfL data is station arrival predictions, not train positions.
+Kindle Horizon has been tested on one older Kindle with KOReader. Other models and firmware versions may need layout or launch adjustments. **Auto** uses the device zone when KOReader reports a non-UTC zone, then falls back to Eastern; change it in the menu if that does not match your location. The aircraft, satellite, and train views use saved coordinates; the Kindle does not detect its physical location. Satellite directions and SEPTA train positions are approximate. TfL data is station arrival predictions, not train positions.
 
 The plugin source and vector-like raster diagrams are original to this project. KOReader, the launcher used to start it, and the live data services are separate third-party projects. Their binaries are not included in this repository. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for attribution and service terms.
 
 ## License
 
-Kindle Sky's code, diagrams, and documentation are available under the [MIT License](LICENSE). You may use, modify, and distribute them, including commercially, with the copyright and license notice. The live data feeds have their own terms; in particular, the public adsb.fi endpoint is limited to personal, non-commercial use. See [data sources and limitations](docs/DATA_AND_LIMITS.md) before using those services in another project.
+Kindle Horizon's code, diagrams, and documentation are available under the [MIT License](LICENSE). You may use, modify, and distribute them, including commercially, with the copyright and license notice. The live data feeds have their own terms; in particular, the public adsb.fi endpoint is limited to personal, non-commercial use. See [data sources and limitations](docs/DATA_AND_LIMITS.md) before using those services in another project.
