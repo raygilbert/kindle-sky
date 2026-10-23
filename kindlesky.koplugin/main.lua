@@ -416,6 +416,9 @@ function Dashboard:paintSatellites(bb)
         text(bb, string.format("%03d deg direction  /  %.0f deg high  /  %.0f km away",
             sat.bearing, sat.elevation, sat.range_km), 24, y + 31,
             wide and 17 or 18, wide and 345 or W - 48)
+        local visibility = sat.possible_visible and "POSSIBLY VISIBLE / weather unknown"
+            or (sat.sunlit and "DAYLIGHT OR TWILIGHT SKY" or "IN EARTH SHADOW")
+        text(bb, visibility, 24, y + 54, 15, wide and 345 or W - 48)
     end
     if wide then
         bb:paintRect(391, 122, 2, 383, GRAY)
@@ -424,12 +427,12 @@ function Dashboard:paintSatellites(bb)
         if featured then
             Visuals.paintSatellite(bb, 637, 438, 119, 48, featured.iss, BLACK, WHITE)
         end
-        text(bb, "Approximate positions / not a visibility forecast", 24, 485, 16, 590)
+        text(bb, "Approximate positions / visibility is an estimate", 24, 485, 16, 590)
     else
         rule(bb, 453)
         text(bb, "YOUR SKY NOW", 24, 471, 20, W - 48, true)
         self:paintSatelliteSky(bb, overhead, math.floor(W / 2), 615, 85)
-        text(bb, "Approximate positions / visibility unverified", 24, 707, 15, W - 48)
+        text(bb, "Approximate positions / visibility is an estimate", 24, 707, 15, W - 48)
     end
 end
 

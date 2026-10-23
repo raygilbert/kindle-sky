@@ -8,7 +8,7 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 
 - A home view with nearby aircraft, radar, a featured aircraft, and a satellite currently high in the sky.
 - Aircraft details with reported callsign, type, registration, distance, bearing, altitude, speed, and a **representative** monochrome silhouette. Distinct outlines include widebody jets, airliners, business jets, light prop planes, turboprops, fighters, and helicopters. The silhouette is not a photo or an exact depiction of that registration.
-- A satellite view with a local sky map and up to three satellites above 10° elevation. The ISS appears when it is above your saved location; its solar-array diagram remains available when featured.
+- A satellite view with a local sky map and up to three satellites above 10° elevation, plus a cautious sunlight and twilight visibility hint. The ISS appears when it is above your saved location; its solar-array diagram remains available when featured.
 - A location-dependent train view with a simple railcar diagram: approximate SEPTA Regional Rail train positions near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
 - Automatic Home → Aircraft → Satellites → Trains view changes every 90 seconds where a train feed is supported. When several aircraft are nearby, Aircraft turns favor emergency, reported military, and selected unusual types while avoiding consecutive repeats where possible. A newly detected emergency opens its detail view immediately.
 - Data-age and **STALE** indicators when a feed stops updating. The display keeps the Kindle awake while it runs and restores normal sleep behavior when closed.
@@ -22,7 +22,7 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 
 See [installation and controls](docs/INSTALLATION.md) for the complete setup and [data sources and limitations](docs/DATA_AND_LIMITS.md) before using the feeds.
 
-Keep your own coordinates and Kindle settings out of public issues and pull requests. The public source contains example coordinates; installed settings live on the device. HTTPS requests verify certificate chains using KOReader's CA bundle, but the bundled LuaSec build does not verify hostnames. Satellite directions use an approximate local orbit calculation and are not an optical visibility forecast. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for those limits.
+Keep your own coordinates and Kindle settings out of public issues and pull requests. The public source contains example coordinates; installed settings live on the device. HTTPS requests verify certificate chains using KOReader's CA bundle, but the bundled LuaSec build does not verify hostnames. Satellite directions and visibility hints are approximate; weather and actual brightness are not checked. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for those limits.
 
 ## Current scope
 

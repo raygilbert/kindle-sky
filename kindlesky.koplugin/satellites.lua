@@ -69,6 +69,17 @@ local function gmst(jd)
         + 0.000387933 * t * t - t * t * t / 38710000) % 360)
 end
 
+local function sun_direction(jd)
+    -- Low-precision solar direction is sufficient for a twilight/shadow hint.
+    local days = jd - 2451545.0
+    local mean_longitude = rad((280.460 + 0.9856474 * days) % 360)
+    local mean_anomaly = rad((357.528 + 0.9856003 * days) % 360)
+    local longitude = mean_longitude + rad(1.915) * sin(mean_anomaly)
+        + rad(0.020) * sin(2 * mean_anomaly)
+    local obliquity = rad(23.439 - 0.0000004 * days)
+    return cos(longitude), cos(obliquity) * sin(longitude), sin(obliquity) * sin(longitude)
+end
+
 function Satellites.position(sat, now, lat, lon)
     if not sat or not finite(lat) or not finite(lon) then return nil end
     local jd = now / seconds_per_day + 2440587.5
@@ -121,12 +132,22 @@ function Satellites.position(sat, now, lat, lon)
     local north = -slat * clon * dx - slat * slon * dy + clat * dz
     local up = clat * clon * dx + clat * slon * dy + slat * dz
     local range = sqrt(east * east + north * north + up * up)
+    local sx, sy, sz = sun_direction(jd)
+    local sun_x = cos(theta) * sx + sin(theta) * sy
+    local sun_y = -sin(theta) * sx + cos(theta) * sy
+    local sun_elevation = deg(math.asin(math.max(-1, math.min(1,
+        clat * clon * sun_x + clat * slon * sun_y + slat * sz))))
+    local sun_dot = x * sx + y * sy + z * sz
+    local sunlit = sun_dot >= 0 or sqrt(math.max(0, r * r - sun_dot * sun_dot)) > earth_radius
+    local dark_sky = sun_elevation <= -6
     return {
         id = sat.id, name = sat.name,
         bearing = (deg(atan2(east, north)) + 360) % 360,
         elevation = deg(math.asin(math.max(-1, math.min(1, up / range)))),
         range_km = range, altitude_km = r - earth_radius,
         iss = sat.id == 25544,
+        sunlit = sunlit, dark_sky = dark_sky,
+        possible_visible = sunlit and dark_sky,
     }
 end
 
