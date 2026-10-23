@@ -156,6 +156,32 @@ function Visuals.paintAircraft(bb, x, y, width, height, aircraft, black, white)
     return label
 end
 
+function Visuals.paintSatellite(bb, x, y, width, height, is_iss, black, white)
+    if is_iss then return Visuals.paintISS(bb, x, y, width, height, black, white) end
+    local cy = math.floor(y + height / 2)
+    local panel_w = math.max(9, math.floor(width * 0.23))
+    local panel_h = math.max(8, math.floor(height * 0.55))
+    local panel_y = cy - math.floor(panel_h / 2)
+    local body_w = math.max(12, math.floor(width * 0.19))
+    local body_h = math.max(10, math.floor(height * 0.49))
+    local body_x = math.floor(x + (width - body_w) / 2)
+    bb:paintRect(math.floor(x), panel_y, panel_w, panel_h, black)
+    bb:paintRect(math.floor(x + width - panel_w), panel_y, panel_w, panel_h, black)
+    for _, px in ipairs({math.floor(x), math.floor(x + width - panel_w)}) do
+        bb:paintRect(px + math.floor(panel_w / 2), panel_y + 1, 1, panel_h - 2, white)
+        bb:paintRect(px + 1, cy, panel_w - 2, 1, white)
+    end
+    bb:paintRect(math.floor(x + panel_w), cy - 2, body_x - math.floor(x + panel_w), 4, black)
+    bb:paintRect(body_x + body_w, cy - 2,
+        math.floor(x + width - panel_w - body_x - body_w), 4, black)
+    bb:paintRect(body_x, cy - math.floor(body_h / 2), body_w, body_h, black)
+    bb:paintRect(body_x + math.floor(body_w / 3), cy - math.floor(body_h / 2) + 2,
+        math.max(2, math.floor(body_w / 3)), math.max(3, body_h - 4), white)
+    bb:paintRect(body_x + math.floor(body_w / 2),
+        cy - math.floor(body_h / 2) - math.max(4, math.floor(height * 0.14)), 2,
+        math.max(4, math.floor(height * 0.14)), black)
+end
+
 function Visuals.paintISS(bb, x, y, width, height, black, white)
     local panel_y = math.floor(y + height * 0.16)
     local panel_h = math.floor(height * 0.68)

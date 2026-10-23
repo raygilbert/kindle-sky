@@ -25,6 +25,7 @@ local Visuals = dofile(plugin_dir .. "visuals.lua")
 local Time = dofile(plugin_dir .. "time.lua")
 local Rotation = dofile(plugin_dir .. "rotation.lua")
 local Trains = dofile(plugin_dir .. "trains.lua")
+local Satellites = dofile(plugin_dir .. "satellites.lua")
 local W, H = Screen:getWidth(), Screen:getHeight()
 local BLACK, WHITE, GRAY = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_DARK_GRAY
 
@@ -66,18 +67,6 @@ local function age(ts)
     return seconds < 60 and (seconds .. "s") or (math.floor(seconds / 60) .. "m")
 end
 
-local function pass_time(ts, timezone)
-    if not ts then return "--" end
-    local display, zone = Time.format(ts, "%a %I:%M %p", timezone)
-    return display:gsub(" 0", " ") .. " " .. zone
-end
-
-local function pass_headline(pass, timezone)
-    if pass.active then return "NOW  /  " .. pass_time(pass.start, timezone) end
-    if pass.minutes <= 60 then return "IN " .. pass.minutes .. " MIN  /  " .. pass_time(pass.start, timezone) end
-    return pass_time(pass.start, timezone)
-end
-
 local Dashboard = InputContainer:extend {}
 
 function Dashboard:init()
@@ -93,7 +82,7 @@ function Dashboard:onSwitchView(_, ges)
     local app = self.owner
     local px, py = ges and ges.pos and ges.pos.x or 0, ges and ges.pos and ges.pos.y or 0
     local nearest, best = nil, 20 * 20
-    if app.mode ~= "iss" then
+    if app.mode ~= "satellites" then
         for _, dot in ipairs(self.radar_dots or {}) do
             local d = (px - dot.x)^2 + (py - dot.y)^2
             if d < best then nearest, best = dot.index, d end
@@ -104,7 +93,7 @@ function Dashboard:onSwitchView(_, ges)
             app.selected_index = nearest
             app.mode = "aircraft"
         elseif py >= (W > H and 402 or 625) then
-            app.mode = "iss"
+            app.mode = "satellites"
         else
             app.mode = "aircraft"
         end
@@ -116,9 +105,9 @@ function Dashboard:onSwitchView(_, ges)
         elseif px < W / 2 and app.aircraft and #app.aircraft > 0 then
             app.selected_index = (app.selected_index or 1) % #app.aircraft + 1
         else
-            app.mode = "iss"
+            app.mode = "satellites"
         end
-    elseif app.mode == "iss" and app.train_provider then
+    elseif app.mode == "satellites" and app.train_provider then
         app.mode = "trains"
     else
         app.mode = "home"
@@ -143,12 +132,12 @@ function Dashboard:paintTo(bb, x, y)
     local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
     text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
     local mode_name = app.mode == "home" and "AT A GLANCE" or
-        (app.mode == "aircraft" and "AIRCRAFT" or (app.mode == "iss" and "ISS" or "TRAINS"))
+        (app.mode == "aircraft" and "AIRCRAFT" or (app.mode == "satellites" and "SATELLITES" or "TRAINS"))
     text(bb, "LOCAL  /  " .. mode_name, 24, 68, 20, 350)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
-    local iss_status = (app.iss_error and "STALE " or "") .. age(app.iss_updated_at)
+    local satellite_status = (app.satellite_error and "STALE " or "") .. age(app.catalog_updated_at)
     local train_status = app.train_provider and ("  RAIL " .. (app.train_error and "STALE " or "") .. age(app.train_updated_at)) or ""
-    text(bb, "AIR " .. air_status .. "  ISS " .. iss_status .. train_status,
+    text(bb, "AIR " .. air_status .. "  SAT " .. satellite_status .. train_status,
         W > H and 418 or 285, 75, 15, W > H and 360 or 310)
     rule(bb, 103)
     self.radar_dots = {}
@@ -159,17 +148,17 @@ function Dashboard:paintTo(bb, x, y)
     elseif app.mode == "trains" then
         self:paintTrains(bb)
     else
-        self:paintISS(bb)
+        self:paintSatellites(bb)
     end
     rule(bb, H - 71)
-    local source = app.mode == "home" and "adsb.fi / wheretheiss.at / issinfo.net"
+    local source = app.mode == "home" and "adsb.fi / CelesTrak"
         or (app.mode == "aircraft" and "https://adsb.fi" or
         (app.mode == "trains" and (app.train_provider == "septa" and "SEPTA Regional Rail API" or "Transport for London API")
-        or "wheretheiss.at / issinfo.net"))
+        or "CelesTrak GP / approximate sky positions"))
     text(bb, source, 24, H - 58, 15)
-    local hint = app.mode == "home" and "Tap radar: aircraft   Tap pass: ISS   Hold: exit"
-        or (app.mode == "aircraft" and "Tap left: next   Right: ISS   Header: home"
-        or (app.mode == "iss" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))
+    local hint = app.mode == "home" and "Tap radar: aircraft   Tap satellite: sky   Hold: exit"
+        or (app.mode == "aircraft" and "Tap left: next   Right: satellites   Header: home"
+        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))
     text(bb, hint, 24, H - 33, 16)
 end
 
@@ -254,7 +243,7 @@ function Dashboard:paintRadar(bb, ac, cx, cy, radius, range_nm, selected_index)
 end
 
 function Dashboard:paintHome(bb)
-    local app, ac, pass = self.owner, self.owner.aircraft, self.owner.next_pass
+    local app, ac = self.owner, self.owner.aircraft
     local landscape = W > H
     local first = ac and ac[1]
     local radar_x, radar_y, radar_r = landscape and 192 or math.floor(W / 2), landscape and 266 or 270, landscape and 110 or 115
@@ -296,17 +285,21 @@ function Dashboard:paintHome(bb)
     end
     local divider = landscape and 404 or 631
     rule(bb, divider)
-    text(bb, (app.pass_error and pass and "STALE / " or "") .. "NEXT VISIBLE ISS PASS", 24, divider + 17, 19, W - 48, true)
-    Visuals.paintISS(bb, landscape and 647 or 450, divider + (landscape and 30 or 28),
-        landscape and 110 or 105, landscape and 53 or 44, BLACK, WHITE)
-    if pass then
-        text(bb, pass_headline(pass, app.settings.timezone), 24, divider + 46, landscape and 30 or 25,
-            landscape and 590 or 410, true)
-        text(bb, string.format("Look %s to %s  /  peaks at %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0),
-            24, divider + (landscape and 87 or 78), landscape and 21 or 18,
+    local overhead = app.satellites or {}
+    local feature = Satellites.feature(overhead)
+    text(bb, string.format("SATELLITES ABOVE 10 DEG  /  %d", #overhead),
+        24, divider + 17, 19, W - 48, true)
+    if feature then
+        text(bb, feature.name, 24, divider + 48, landscape and 28 or 23,
+            landscape and 590 or 400, true)
+        text(bb, string.format("%03d deg direction  /  %.0f deg high", feature.bearing, feature.elevation),
+            24, divider + (landscape and 86 or 76), landscape and 20 or 17,
             landscape and 590 or 410)
+        Visuals.paintSatellite(bb, landscape and 651 or 460, divider + 35,
+            landscape and 106 or 92, landscape and 52 or 38, feature.iss, BLACK, WHITE)
     else
-        text(bb, app.pass_error or "No visible pass in 10 days", 24, divider + 52, 21, W - 48)
+        text(bb, app.satellite_error or "No catalog satellites high in the sky", 24,
+            divider + 53, landscape and 21 or 18, W - 48)
     end
 end
 
@@ -374,85 +367,69 @@ function Dashboard:paintAircraftLandscape(bb)
     self:paintRadar(bb, ac, 592, 425, 64, app.settings.radius_nm, app.selected_index or 1)
 end
 
-function Dashboard:paintSkyView(bb, iss, cx, cy, radius)
+function Dashboard:paintSatelliteSky(bb, satellites, cx, cy, radius)
     ring(bb, cx, cy, radius, BLACK)
     ring(bb, cx, cy, math.floor(radius / 2), GRAY)
     bb:paintRect(cx - 1, cy - radius, 2, radius * 2, GRAY)
     bb:paintRect(cx - radius, cy - 1, radius * 2, 2, GRAY)
-    text(bb, "N", cx - 7, cy - radius - 25, 17, 20)
-    text(bb, "E", cx + radius + 8, cy - 10, 17, 20)
-    if radius >= 50 then text(bb, "S", cx - 7, cy + radius + 6, 17, 20) end
-    text(bb, "W", cx - radius - 23, cy - 10, 17, 20)
-    if iss.elevation and iss.elevation > 0 then
-        local distance = (90 - math.min(90, iss.elevation)) / 90 * radius
-        local bearing = math.rad(iss.bearing or 0)
+    text(bb, "N", cx - 8, cy - radius - 27, 18, 20, true)
+    text(bb, "E", cx + radius + 9, cy - 10, 18, 20, true)
+    text(bb, "S", cx - 8, cy + radius + 6, 18, 20, true)
+    text(bb, "W", cx - radius - 25, cy - 10, 18, 20, true)
+    for i = 1, math.min(#satellites, 12) do
+        local sat = satellites[i]
+        local distance = (90 - math.min(90, sat.elevation)) / 90 * radius
+        local bearing = math.rad(sat.bearing)
         local px = math.floor(cx + math.sin(bearing) * distance)
         local py = math.floor(cy - math.cos(bearing) * distance)
-        bb:paintRect(px - 7, py - 7, 14, 14, BLACK)
-    elseif radius >= 50 then
-        bb:paintRect(cx - 90, cy - 17, 180, 34, WHITE)
-        text(bb, "BELOW HORIZON", cx - 87, cy - 12, 18, 174, true)
+        local size = sat.iss and 12 or (i <= 3 and 9 or 5)
+        bb:paintRect(px - math.floor(size / 2), py - math.floor(size / 2), size, size, BLACK)
     end
 end
 
-function Dashboard:paintISS(bb)
-    local app, iss, pass = self.owner, self.owner.iss, self.owner.next_pass
-    if W > H then return self:paintISSLandscape(bb) end
-    if not iss then
-        text(bb, "ISS DATA UNAVAILABLE", 24, 135, 25, W - 48, true)
-        text(bb, app.iss_error or "Check Wi-Fi", 24, 180, 19)
-        return
+function Dashboard:paintSatellites(bb)
+    local app = self.owner
+    local overhead = app.satellites or {}
+    local featured = Satellites.feature(overhead)
+    local wide = W > H
+    local names = {}
+    if featured then names[#names + 1] = featured end
+    for _, sat in ipairs(overhead) do
+        if sat ~= featured and #names < 3 then names[#names + 1] = sat end
     end
-    text(bb, "INTERNATIONAL SPACE STATION", 24, 130, 21, W - 48, true)
-    text(bb, string.format("%.1f%s  /  %.1f%s", math.abs(iss.lat), iss.lat < 0 and "S" or "N", math.abs(iss.lon), iss.lon < 0 and "W" or "E"), 24, 176, 24)
-    text(bb, string.format("%.0f km altitude", iss.altitude_km or 0), 24, 220, 23)
-    text(bb, string.format("%.0f km/h  /  %.0f km ground range", iss.velocity_kmh or 0, iss.distance_km), 24, 258, 20)
-    text(bb, iss.elevation > 0 and string.format("%.0f deg above %03d deg", iss.elevation, iss.bearing)
-        or "Below your horizon now", 24, 284, 17, W - 48, true)
-    rule(bb, 307)
-    text(bb, "THE ISS / SOLAR ARRAYS", 24, 322, 18, W - 48, true)
-    Visuals.paintISS(bb, 70, 356, W - 140, 72, BLACK, WHITE)
-    text(bb, "Solar panels flank the central modules", 24, 436, 17, W - 48)
-    text(bb, "LOCAL SKY VIEW", 24, 463, 17, W - 48, true)
-    self:paintSkyView(bb, iss, math.floor(W / 2), 521, 32)
-    rule(bb, 575)
-    text(bb, "NEXT VISIBLE PASS", 24, 590, 18, W - 48, true)
-    if pass then
-        text(bb, pass_headline(pass, app.settings.timezone), 24, 623, 28, W - 48, true)
-        text(bb, string.format("%s to %s  /  max %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0), 24, 671, 21)
+    text(bb, string.format("%d SATELLITES ABOVE 10 DEG", #overhead), 24, 126,
+        wide and 23 or 22, wide and 355 or 400, true)
+    if featured and not wide then
+        Visuals.paintSatellite(bb, 459, 138, 110, 47, featured.iss, BLACK, WHITE)
+    end
+    if not app.catalog then
+        text(bb, app.satellite_error or "Waiting for orbital data", 24, 175, 21,
+            wide and 350 or W - 48)
+    elseif #overhead == 0 then
+        text(bb, app.satellite_error or "None of the tracked satellites is high in the sky", 24, 175,
+            wide and 19 or 20, wide and 350 or W - 48)
+    end
+    for i, sat in ipairs(names) do
+        local y = (wide and 184 or 206) + (i - 1) * (wide and 82 or 77)
+        text(bb, (sat.iss and "ISS  /  " or "") .. sat.name, 24, y,
+            wide and 23 or 22, wide and 345 or W - 48, true)
+        text(bb, string.format("%03d deg direction  /  %.0f deg high  /  %.0f km away",
+            sat.bearing, sat.elevation, sat.range_km), 24, y + 31,
+            wide and 17 or 18, wide and 345 or W - 48)
+    end
+    if wide then
+        bb:paintRect(391, 122, 2, 383, GRAY)
+        text(bb, "YOUR SKY NOW", 432, 127, 20, 340, true)
+        self:paintSatelliteSky(bb, overhead, 592, 297, 112)
+        if featured then
+            Visuals.paintSatellite(bb, 637, 438, 119, 48, featured.iss, BLACK, WHITE)
+        end
+        text(bb, "Approximate positions / not a visibility forecast", 24, 485, 16, 590)
     else
-        text(bb, app.pass_error or "No visible pass in 10 days", 24, 632, 21)
-    end
-end
-
-function Dashboard:paintISSLandscape(bb)
-    local app, iss, pass = self.owner, self.owner.iss, self.owner.next_pass
-    if not iss then
-        text(bb, "ISS DATA UNAVAILABLE", 24, 145, 25, 360, true)
-        text(bb, app.iss_error or "Check Wi-Fi", 24, 190, 19, 360)
-        return
-    end
-    text(bb, "INTERNATIONAL SPACE STATION", 24, 128, 21, 365, true)
-    text(bb, string.format("%.1f%s  /  %.1f%s", math.abs(iss.lat), iss.lat < 0 and "S" or "N", math.abs(iss.lon), iss.lon < 0 and "W" or "E"), 24, 177, 24, 355)
-    text(bb, string.format("%.0f km altitude", iss.altitude_km or 0), 24, 219, 23, 355)
-    text(bb, string.format("%.0f km/h", iss.velocity_kmh or 0), 24, 259, 23, 355)
-    text(bb, string.format("%.0f km ground range", iss.distance_km), 24, 296, 21, 355)
-    local sky_text = iss.elevation > 0 and string.format("%.0f deg above %03d deg", iss.elevation, iss.bearing)
-        or "Below your horizon now"
-    text(bb, sky_text, 24, 338, 19, 355, true)
-    bb:paintRect(391, 122, 2, 383, GRAY)
-    text(bb, "THE ISS / SOLAR ARRAYS", 421, 128, 19, 350, true)
-    Visuals.paintISS(bb, 432, 162, 328, 92, BLACK, WHITE)
-    text(bb, "Solar panels + central modules", 421, 261, 17, 350)
-    text(bb, "LOCAL SKY NOW", 421, 288, 17, 350, true)
-    self:paintSkyView(bb, iss, 592, 342, 34)
-    rule(bb, 392)
-    text(bb, "NEXT VISIBLE PASS", 24, 409, 19, W - 48, true)
-    if pass then
-        text(bb, pass_headline(pass, app.settings.timezone), 24, 440, 25, 380, true)
-        text(bb, string.format("%s to %s  /  max %.0f deg", pass.direction, pass.end_direction, pass.elevation or 0), 421, 451, 21, 350)
-    else
-        text(bb, app.pass_error or "No visible pass in 10 days", 24, 450, 21, W - 48)
+        rule(bb, 453)
+        text(bb, "YOUR SKY NOW", 24, 471, 20, W - 48, true)
+        self:paintSatelliteSky(bb, overhead, math.floor(W / 2), 615, 85)
+        text(bb, "Approximate positions / visibility unverified", 24, 707, 15, W - 48)
     end
 end
 
@@ -461,6 +438,7 @@ local Sky = WidgetContainer:extend { name = "kindlesky", is_doc_only = false }
 local defaults = { lat = 40.7128, lon = -74.0060, radius_nm = 40, refresh_seconds = 120,
     landscape = true, auto_rotate = true, timezone = "auto" }
 local ROTATE_SECONDS = 90
+local CATALOG_SECONDS = 2 * 60 * 60
 local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 local CA_BUNDLE = DataStorage:getFullDataDir() .. "/data/ca-bundle.crt"
 
@@ -501,7 +479,13 @@ end
 
 function Sky:init()
     self.settings_file = LuaSettings:open(DataStorage:getSettingsDir() .. "/kindlesky.lua")
+    self.catalog_file = LuaSettings:open(DataStorage:getSettingsDir() .. "/kindlesky_catalog.lua")
     self.settings = self.settings_file:readSetting("settings") or defaults
+    self.catalog = self.catalog_file:readSetting("catalog")
+    if type(self.catalog) ~= "table" then self.catalog = nil end
+    self.catalog_updated_at = self.catalog_file:readSetting("updated_at")
+    self.catalog_checked_at = self.catalog_file:readSetting("checked_at")
+    self.catalog_halted = self.catalog_file:readSetting("halted") == true
     if self.settings.landscape == nil then self.settings.landscape = true end
     if self.settings.auto_rotate == nil then self.settings.auto_rotate = true end
     if not Time.isValidZone(self.settings.timezone) then self.settings.timezone = "auto" end
@@ -518,6 +502,14 @@ end
 function Sky:saveSettings()
     self.settings_file:saveSetting("settings", self.settings)
     self.settings_file:flush()
+end
+
+function Sky:saveCatalog()
+    self.catalog_file:saveSetting("catalog", self.catalog)
+    self.catalog_file:saveSetting("updated_at", self.catalog_updated_at)
+    self.catalog_file:saveSetting("checked_at", self.catalog_checked_at)
+    self.catalog_file:saveSetting("halted", self.catalog_halted or false)
+    self.catalog_file:flush()
 end
 
 function Sky:setKeepAwake(enabled)
@@ -557,23 +549,19 @@ end
 function Sky:rotateView()
     if not self.running or not self.settings.auto_rotate then return end
     local previous_mode = self.mode
-    local pass, now = self.next_pass, os.time()
-    local imminent_pass = pass and pass.visible and now <= pass.finish
-        and (pass.active or pass.start - now <= 600)
+    local now = os.time()
     if self.emergency_hold_until and now < self.emergency_hold_until then
         self.mode = "aircraft"
-    elseif imminent_pass then
-        self.mode = "iss"
     elseif self.mode == "home" then
         if self.aircraft and #self.aircraft > 0 then
             self.selected_index, self.rotation_state = Rotation.choose(self.aircraft, self.rotation_state)
             self.mode = "aircraft"
         else
-            self.mode = "iss"
+            self.mode = "satellites"
         end
     elseif self.mode == "aircraft" then
-        self.mode = "iss"
-    elseif self.mode == "iss" and self.train_provider then
+        self.mode = "satellites"
+    elseif self.mode == "satellites" and self.train_provider then
         self.mode = "trains"
     else
         self.mode = "home"
@@ -600,7 +588,7 @@ function Sky:start()
     self.alerted_emergency_ids = {}
     self.emergency_hold_until = nil
     self.aircraft_error = "Waiting for Wi-Fi"
-    self.iss_error = "Waiting for Wi-Fi"
+    self.satellite_error = self.catalog and nil or "Waiting for orbital data"
     self.train_provider = Trains.provider(self.settings.lat, self.settings.lon)
     self.train_error = self.train_provider and "Waiting for Wi-Fi" or nil
     self.dashboard = Dashboard:new { owner = self }
@@ -632,23 +620,16 @@ function Sky:refresh()
     if not self.running then return end
     UIManager:unschedule(self.refresh_task)
     UIManager:scheduleIn(self.settings.refresh_seconds, self.refresh_task)
-    if self.next_pass then
-        local now = os.time()
-        if now > self.next_pass.finish then
-            self.next_pass = nil
-            self.pass_checked_at = nil
-        else
-            self.next_pass.minutes = math.max(0, math.ceil((self.next_pass.start - now) / 60))
-            self.next_pass.active = self.next_pass.start <= now
-        end
+    self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(),
+        self.settings.lat, self.settings.lon, 10) or nil
+    if self.catalog_updated_at and os.time() - self.catalog_updated_at > 3 * 86400 then
+        self.satellite_error = "Orbital data expired"
     end
     if not NetworkMgr:isConnected() then
         self.aircraft_error = "Wi-Fi offline"
-        self.iss_error = "Wi-Fi offline"
-        self.pass_error = "Wi-Fi offline"
+        self.satellite_error = "Wi-Fi offline"
         if self.train_provider then self.train_error = "Wi-Fi offline" end
         if not self.aircraft_updated_at or os.time() - self.aircraft_updated_at > 600 then self.aircraft = nil end
-        if not self.iss_updated_at or os.time() - self.iss_updated_at > 600 then self.iss = nil end
         if not self.train_updated_at or os.time() - self.train_updated_at > 600 then self.trains = nil end
         if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
     end
@@ -691,32 +672,41 @@ function Sky:refresh()
             self.aircraft_error = aircraft_error or "Aircraft data unavailable"
             if not self.aircraft_updated_at or os.time() - self.aircraft_updated_at > 600 then self.aircraft = nil end
         end
-        local iss_response, iss_error = get_json("https://api.wheretheiss.at/v1/satellites/25544")
-        if iss_response then
-            self.iss = Data.iss(iss_response, lat, lon)
-            self.iss_updated_at = os.time()
-            self.iss_error = self.iss and nil or "Invalid ISS position"
-        else
-            self.iss_error = iss_error or "ISS data unavailable"
-            if not self.iss_updated_at or os.time() - self.iss_updated_at > 600 then self.iss = nil end
-        end
-        if self.next_pass and os.time() > self.next_pass.finish then
-            self.next_pass = nil
-            self.pass_checked_at = nil
-        end
-        if not self.pass_checked_at or os.time() - self.pass_checked_at > 3600 then
-            local pass_url = string.format("https://issinfo.net/next-pass?lat=%.4f&lon=%.4f&format=json", lat, lon)
-            local pass_response, pass_error = get_json(pass_url)
-            if pass_response then
-                self.next_pass = Data.pass(pass_response, os.time())
-                self.pass_error = nil
-                self.pass_checked_at = os.time()
+        if not self.catalog_halted and (not self.catalog_checked_at
+            or os.time() - self.catalog_checked_at >= CATALOG_SECONDS) then
+            self.catalog_checked_at = os.time()
+            local response, request_error = get_json("https://celestrak.org/NORAD/elements/gp.php?GROUP=VISUAL&FORMAT=JSON")
+            if response then
+                local catalog = Satellites.parse(response, os.time())
+                local has_iss = false
+                for _, sat in ipairs(catalog or {}) do
+                    if sat.id == 25544 then has_iss = true; break end
+                end
+                if catalog and not has_iss then
+                    local iss_response, iss_error = get_json("https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=JSON")
+                    if iss_response then
+                        for _, sat in ipairs(Satellites.parse(iss_response, os.time()) or {}) do
+                            catalog[#catalog + 1] = sat
+                        end
+                    elseif iss_error and iss_error:match("^HTTP ") then
+                        self.catalog_halted = true
+                    end
+                end
+                if catalog and #catalog > 0 then
+                    self.catalog, self.catalog_updated_at = catalog, os.time()
+                    self.satellite_error = nil
+                else
+                    self.satellite_error = "Orbital catalog unavailable"
+                end
             else
-                self.pass_error = pass_error or "Pass prediction unavailable"
+                self.satellite_error = request_error or "Orbital catalog unavailable"
+                if request_error and request_error:match("^HTTP ") then
+                    self.catalog_halted = true
+                end
             end
-        elseif self.next_pass then
-            self.pass_error = nil
+            self:saveCatalog()
         end
+        self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(), lat, lon, 10) or nil
         if self.train_provider == "septa" then
             local response, request_error = get_json("https://www3.septa.org/api/TrainView/index.php")
             if response then
@@ -744,16 +734,6 @@ function Sky:refresh()
         end
         if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
             self.trains = nil
-        end
-        if self.next_pass then
-            self.next_pass.minutes = math.max(0, math.ceil((self.next_pass.start - os.time()) / 60))
-            self.next_pass.active = self.next_pass.start <= os.time() and os.time() <= self.next_pass.finish
-        end
-        if not emergency_preempted and not (self.emergency_hold_until and os.time() < self.emergency_hold_until)
-            and self.next_pass and self.next_pass.visible and self.next_pass.minutes <= 10
-            and not self.next_pass.active and self.alerted_pass_start ~= self.next_pass.start then
-            self.mode = "iss"
-            self.alerted_pass_start = self.next_pass.start
         end
         self.refresh_count = (self.refresh_count or 0) + 1
         if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
@@ -805,6 +785,7 @@ function Sky:configure()
                 self.train_stop, self.train_stop_checked_at = nil, nil
                 self.trains, self.train_updated_at = nil, nil
                 self.train_error = self.train_provider and "Waiting for Wi-Fi" or nil
+                self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(), lat, lon, 10) or nil
                 if not self.train_provider and self.mode == "trains" then self.mode = "home" end
                 self:saveSettings()
                 UIManager:close(dialog)
@@ -846,6 +827,11 @@ function Sky:addToMainMenu(menu_items)
                   self:scheduleRotation()
               end },
             { text = _("Set location and refresh"), callback = function() self:configure() end },
+            { text = _("Retry satellite catalog"), callback = function()
+                  self.catalog_halted, self.catalog_checked_at = nil, nil
+                  self:saveCatalog()
+                  if self.running then self:refresh() end
+              end },
             { text = _("Show nearby trains"), enabled_func = function()
                   return Trains.provider(self.settings.lat, self.settings.lon) ~= nil
               end, callback = function()

@@ -13,4 +13,5 @@ private/
 installed-snapshot/
 editor-backups/
 kindlesky.lua
+kindlesky_catalog.lua
 koreader/

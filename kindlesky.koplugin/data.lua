@@ -65,45 +65,4 @@ function Data.aircraft(response, lat, lon, radius_nm)
     return found
 end
 
-function Data.iss(response, lat, lon)
-    if type(response) ~= "table" or not tonumber(response.latitude) or not tonumber(response.longitude) then return nil end
-    local ilat, ilon = tonumber(response.latitude), tonumber(response.longitude)
-    local altitude = tonumber(response.altitude) or 0
-    local ground_distance = Data.distance_km(lat, lon, ilat, ilon)
-    local earth_radius = 6371
-    local central_angle = ground_distance / earth_radius
-    local elevation = math.deg(math.atan2((earth_radius + altitude) * math.cos(central_angle) - earth_radius,
-        (earth_radius + altitude) * math.sin(central_angle)))
-    return {
-        lat = ilat, lon = ilon,
-        altitude_km = altitude,
-        velocity_kmh = tonumber(response.velocity),
-        distance_km = ground_distance,
-        bearing = Data.bearing(lat, lon, ilat, ilon),
-        elevation = elevation,
-        timestamp = tonumber(response.timestamp),
-    }
-end
-
-function Data.pass(response, now)
-    local p = type(response) == "table" and response.pass
-    if type(p) ~= "table" or not tonumber(p.startUTC) then return nil end
-    local start = tonumber(p.startUTC)
-    local finish = tonumber(p.endUTC) or start + 600
-    if finish < now then return nil end
-    return {
-        start = start,
-        peak = tonumber(p.peakUTC),
-        finish = finish,
-        minutes = math.max(0, math.ceil((start - now) / 60)),
-        direction = tostring(p.startDirection or "?"),
-        peak_direction = tostring(p.peakDirection or "?"),
-        end_direction = tostring(p.endDirection or "?"),
-        elevation = tonumber(p.maxElevation),
-        duration_seconds = tonumber(p.durationSeconds),
-        visible = p.visible == true,
-        active = p.inProgress == true or (start <= now and now <= finish),
-    }
-end
-
 return Data
