@@ -29,6 +29,45 @@ local Satellites = dofile(plugin_dir .. "satellites.lua")
 local W, H = Screen:getWidth(), Screen:getHeight()
 local BLACK, WHITE, GRAY = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_DARK_GRAY
 
+-- Diagnostics: a short log so an unexpected exit leaves a trace. It holds no location data.
+local DIAG_LOG = DataStorage:getSettingsDir() .. "/kindlesky_diagnostics.log"
+local DIAG_MAX_BYTES = 64 * 1024
+
+local function diag(kind, detail)
+    pcall(function()
+        local file = io.open(DIAG_LOG, "a")
+        if not file then return end
+        if file:seek("end") > DIAG_MAX_BYTES then
+            file:close()
+            file = io.open(DIAG_LOG, "w")
+            if not file then return end
+        end
+        file:write(os.date("%Y-%m-%d %H:%M:%S", os.time()), "  ", kind,
+            detail and ("  " .. tostring(detail)) or "", "\n")
+        file:close()
+    end)
+end
+
+local function battery_text()
+    local ok, value = pcall(function()
+        local power = Device:getPowerDevice()
+        return string.format("battery %d%%%s", power:getCapacity(), power:isCharging() and " (charging)" or "")
+    end)
+    return ok and value or "battery unknown"
+end
+
+-- KOReader exits when a scheduled task or paint raises a Lua error, which on a Kindle
+-- looks like a return to the home screen. Contain the error, log it, and keep running.
+local function guarded(label, fn, on_error)
+    return function(...)
+        local ok, err = xpcall(fn, debug.traceback, ...)
+        if not ok then
+            diag(label .. " error", err)
+            if on_error then pcall(on_error) end
+        end
+    end
+end
+
 local function text(bb, value, x, y, size, max_width, bold)
     local widget = TextWidget:new {
         text = tostring(value or ""),
@@ -126,6 +165,20 @@ function Dashboard:onCloseView()
 end
 
 function Dashboard:paintTo(bb, x, y)
+    local ok, err = xpcall(function() self:paintContent(bb, x, y) end, debug.traceback)
+    if ok then return end
+    if err ~= self.last_paint_error then
+        self.last_paint_error = err
+        diag("paint error", err)
+    end
+    pcall(function()
+        bb:paintRect(x, y, W, H, WHITE)
+        text(bb, "Display error", 24, 120, 30, W - 48, true)
+        text(bb, "Details: koreader/settings/kindlesky_diagnostics.log", 24, 170, 18, W - 48)
+    end)
+end
+
+function Dashboard:paintContent(bb, x, y)
     local app = self.owner
     bb:paintRect(x, y, W, H, WHITE)
     text(bb, "KINDLE HORIZON", 24, 18, 34, W - 48, true)
@@ -497,8 +550,9 @@ function Sky:init()
     self.rotation_state = {}
     self.alerted_emergency_ids = {}
     self.running = false
-    self.refresh_task = function() self:refresh() end
-    self.rotate_task = function() self:rotateView() end
+    self.refresh_task = guarded("refresh", function() self:refresh() end)
+    self.rotate_task = guarded("rotate", function() self:rotateView() end,
+        function() self:scheduleRotation() end)
     self.ui.menu:registerToMainMenu(self)
 end
 
@@ -581,6 +635,8 @@ end
 function Sky:start()
     if self.running then return end
     self.running = true
+    self.refresh_ticks = 0
+    diag("started", battery_text())
     self.previous_rotation = Screen:getRotationMode()
     local rotation = self.settings.landscape and Screen.DEVICE_ROTATED_COUNTER_CLOCKWISE or Screen.DEVICE_ROTATED_UPRIGHT
     if self.previous_rotation ~= rotation then Screen:setRotationMode(rotation) end
@@ -599,12 +655,14 @@ function Sky:start()
     UIManager:preventStandby()
     self:setKeepAwake(true)
     self:scheduleRotation()
-    self:refresh()
+    self.refresh_task()
 end
 
 function Sky:stop()
     if not self.running then return end
     self.running = false
+    diag("stopped", ((debug.traceback("stop called from:", 2):gsub("%s*\n%s*", " | ")):sub(1, 400))
+        .. "  " .. battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
     self:setKeepAwake(false)
@@ -623,6 +681,11 @@ function Sky:refresh()
     if not self.running then return end
     UIManager:unschedule(self.refresh_task)
     UIManager:scheduleIn(self.settings.refresh_seconds, self.refresh_task)
+    self.refresh_ticks = (self.refresh_ticks or 0) + 1
+    if self.refresh_ticks % 15 == 1 then
+        diag("heartbeat", string.format("tick %d, %s, wifi %s", self.refresh_ticks, battery_text(),
+            NetworkMgr:isConnected() and "up" or "down"))
+    end
     self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(),
         self.settings.lat, self.settings.lon, 10) or nil
     if self.catalog_updated_at and os.time() - self.catalog_updated_at > 3 * 86400 then
@@ -637,122 +700,130 @@ function Sky:refresh()
         if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
     end
     NetworkMgr:runWhenConnected(function()
-        if not self.running then return end
-        local emergency_preempted = false
-        local lat, lon = self.settings.lat, self.settings.lon
-        local aircraft_url = string.format("https://opendata.adsb.fi/api/v3/lat/%.4f/lon/%.4f/dist/%d", lat, lon, self.settings.radius_nm)
-        local aircraft_response, aircraft_error = get_json(aircraft_url)
-        if aircraft_response then
-            local selected = self.aircraft and self.aircraft[self.selected_index]
-            local selected_id = selected and selected.id
-            self.aircraft = Data.aircraft(aircraft_response, lat, lon, self.settings.radius_nm)
-            self.aircraft_updated_at = os.time()
-            self.aircraft_error = nil
-            self.selected_index = 1
-            if selected_id then
-                for i, plane in ipairs(self.aircraft) do
-                    if plane.id == selected_id then self.selected_index = i; break end
-                end
-            end
-            for i, plane in ipairs(self.aircraft) do
-                if plane.emergency then
-                    local identity = Rotation.identity(plane, i)
-                    if not self.alerted_emergency_ids[identity] then
-                        self.alerted_emergency_ids[identity] = true
-                        if not emergency_preempted then
-                            self.selected_index = i
-                            self.rotation_state.last_id = identity
-                            self.rotation_state.last_priority_id = identity
-                            self.mode = "aircraft"
-                            self.emergency_hold_until = os.time() + ROTATE_SECONDS
-                            self:scheduleRotation()
-                            emergency_preempted = true
-                        end
-                    end
-                end
-            end
-        else
-            self.aircraft_error = aircraft_error or "Aircraft data unavailable"
-            if not self.aircraft_updated_at or os.time() - self.aircraft_updated_at > 600 then self.aircraft = nil end
-        end
-        if not self.catalog_halted and (not self.catalog_checked_at
-            or os.time() - self.catalog_checked_at >= CATALOG_SECONDS) then
-            self.catalog_checked_at = os.time()
-            local response, request_error = get_json("https://celestrak.org/NORAD/elements/gp.php?GROUP=VISUAL&FORMAT=JSON")
-            if response then
-                local catalog = Satellites.parse(response, os.time())
-                local has_iss = false
-                for _, sat in ipairs(catalog or {}) do
-                    if sat.id == 25544 then has_iss = true; break end
-                end
-                if catalog and not has_iss then
-                    local iss_response, iss_error = get_json("https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=JSON")
-                    if iss_response then
-                        for _, sat in ipairs(Satellites.parse(iss_response, os.time()) or {}) do
-                            catalog[#catalog + 1] = sat
-                        end
-                    elseif iss_error and iss_error:match("^HTTP ") then
-                        self.catalog_halted = true
-                    end
-                end
-                if catalog and #catalog > 0 then
-                    self.catalog, self.catalog_updated_at = catalog, os.time()
-                    self.satellite_error = nil
-                else
-                    self.satellite_error = "Orbital catalog unavailable"
-                end
-            else
-                self.satellite_error = request_error or "Orbital catalog unavailable"
-                if request_error and request_error:match("^HTTP ") then
-                    self.catalog_halted = true
-                end
-            end
-            self:saveCatalog()
-        end
-        self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(), lat, lon, 10) or nil
-        if self.train_provider == "septa" then
-            local response, request_error = get_json("https://www3.septa.org/api/TrainView/index.php")
-            if response then
-                self.trains = Trains.septa(response, lat, lon, self.settings.radius_nm)
-                self.train_updated_at, self.train_error = os.time(), nil
-            else
-                self.train_error = request_error or "Train data unavailable"
-            end
-        elseif self.train_provider == "tfl" then
-            if not self.train_stop and (not self.train_stop_checked_at or os.time() - self.train_stop_checked_at > 3600) then
-                local stops, request_error = get_json(Trains.stopUrl(lat, lon))
-                self.train_stop_checked_at = os.time()
-                self.train_stop = stops and Trains.closestStop(stops, lat, lon) or nil
-                if not self.train_stop then self.train_error = request_error or "No rail station within 1.5 km" end
-            end
-            if self.train_stop then
-                local arrivals, request_error = get_json("https://api.tfl.gov.uk/StopPoint/" .. self.train_stop.id .. "/Arrivals")
-                if arrivals then
-                    self.trains = Trains.tfl(arrivals)
-                    self.train_updated_at, self.train_error = os.time(), nil
-                else
-                    self.train_error = request_error or "Arrival predictions unavailable"
-                end
-            end
-        end
-        if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
-            self.trains = nil
-        end
-        self.refresh_count = (self.refresh_count or 0) + 1
-        if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
+        guarded("data update", function() self:refreshData() end, function()
+            if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
+        end)()
         NetworkMgr:afterWifiAction()
     end)
 end
 
+function Sky:refreshData()
+    if not self.running then return end
+    local emergency_preempted = false
+    local lat, lon = self.settings.lat, self.settings.lon
+    local aircraft_url = string.format("https://opendata.adsb.fi/api/v3/lat/%.4f/lon/%.4f/dist/%d", lat, lon, self.settings.radius_nm)
+    local aircraft_response, aircraft_error = get_json(aircraft_url)
+    if aircraft_response then
+        local selected = self.aircraft and self.aircraft[self.selected_index]
+        local selected_id = selected and selected.id
+        self.aircraft = Data.aircraft(aircraft_response, lat, lon, self.settings.radius_nm)
+        self.aircraft_updated_at = os.time()
+        self.aircraft_error = nil
+        self.selected_index = 1
+        if selected_id then
+            for i, plane in ipairs(self.aircraft) do
+                if plane.id == selected_id then self.selected_index = i; break end
+            end
+        end
+        for i, plane in ipairs(self.aircraft) do
+            if plane.emergency then
+                local identity = Rotation.identity(plane, i)
+                if not self.alerted_emergency_ids[identity] then
+                    self.alerted_emergency_ids[identity] = true
+                    if not emergency_preempted then
+                        self.selected_index = i
+                        self.rotation_state.last_id = identity
+                        self.rotation_state.last_priority_id = identity
+                        self.mode = "aircraft"
+                        self.emergency_hold_until = os.time() + ROTATE_SECONDS
+                        self:scheduleRotation()
+                        emergency_preempted = true
+                    end
+                end
+            end
+        end
+    else
+        self.aircraft_error = aircraft_error or "Aircraft data unavailable"
+        if not self.aircraft_updated_at or os.time() - self.aircraft_updated_at > 600 then self.aircraft = nil end
+    end
+    if not self.catalog_halted and (not self.catalog_checked_at
+        or os.time() - self.catalog_checked_at >= CATALOG_SECONDS) then
+        self.catalog_checked_at = os.time()
+        local response, request_error = get_json("https://celestrak.org/NORAD/elements/gp.php?GROUP=VISUAL&FORMAT=JSON")
+        if response then
+            local catalog = Satellites.parse(response, os.time())
+            local has_iss = false
+            for _, sat in ipairs(catalog or {}) do
+                if sat.id == 25544 then has_iss = true; break end
+            end
+            if catalog and not has_iss then
+                local iss_response, iss_error = get_json("https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=JSON")
+                if iss_response then
+                    for _, sat in ipairs(Satellites.parse(iss_response, os.time()) or {}) do
+                        catalog[#catalog + 1] = sat
+                    end
+                elseif iss_error and iss_error:match("^HTTP ") then
+                    self.catalog_halted = true
+                end
+            end
+            if catalog and #catalog > 0 then
+                self.catalog, self.catalog_updated_at = catalog, os.time()
+                self.satellite_error = nil
+            else
+                self.satellite_error = "Orbital catalog unavailable"
+            end
+        else
+            self.satellite_error = request_error or "Orbital catalog unavailable"
+            if request_error and request_error:match("^HTTP ") then
+                self.catalog_halted = true
+            end
+        end
+        self:saveCatalog()
+    end
+    self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(), lat, lon, 10) or nil
+    if self.train_provider == "septa" then
+        local response, request_error = get_json("https://www3.septa.org/api/TrainView/index.php")
+        if response then
+            self.trains = Trains.septa(response, lat, lon, self.settings.radius_nm)
+            self.train_updated_at, self.train_error = os.time(), nil
+        else
+            self.train_error = request_error or "Train data unavailable"
+        end
+    elseif self.train_provider == "tfl" then
+        if not self.train_stop and (not self.train_stop_checked_at or os.time() - self.train_stop_checked_at > 3600) then
+            local stops, request_error = get_json(Trains.stopUrl(lat, lon))
+            self.train_stop_checked_at = os.time()
+            self.train_stop = stops and Trains.closestStop(stops, lat, lon) or nil
+            if not self.train_stop then self.train_error = request_error or "No rail station within 1.5 km" end
+        end
+        if self.train_stop then
+            local arrivals, request_error = get_json("https://api.tfl.gov.uk/StopPoint/" .. self.train_stop.id .. "/Arrivals")
+            if arrivals then
+                self.trains = Trains.tfl(arrivals)
+                self.train_updated_at, self.train_error = os.time(), nil
+            else
+                self.train_error = request_error or "Arrival predictions unavailable"
+            end
+        end
+    end
+    if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
+        self.trains = nil
+    end
+    self.refresh_count = (self.refresh_count or 0) + 1
+    if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
+end
+
 function Sky:onSuspend()
+    diag("suspend", battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
 end
 
 function Sky:onResume()
+    diag("resume", battery_text())
     if self.running then
         self:scheduleRotation()
-        self:refresh()
+        self.refresh_task()
     end
 end
 
@@ -792,7 +863,7 @@ function Sky:configure()
                 if not self.train_provider and self.mode == "trains" then self.mode = "home" end
                 self:saveSettings()
                 UIManager:close(dialog)
-                if self.running then self:refresh() end
+                if self.running then self.refresh_task() end
             end },
         } },
     }
@@ -833,7 +904,7 @@ function Sky:addToMainMenu(menu_items)
             { text = _("Retry satellite catalog"), callback = function()
                   self.catalog_halted, self.catalog_checked_at = nil, nil
                   self:saveCatalog()
-                  if self.running then self:refresh() end
+                  if self.running then self.refresh_task() end
               end },
             { text = _("Show nearby trains"), enabled_func = function()
                   return Trains.provider(self.settings.lat, self.settings.lon) ~= nil
