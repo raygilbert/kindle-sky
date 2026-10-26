@@ -39,6 +39,8 @@ local function diag(kind, detail)
         if not file then return end
         if file:seek("end") > DIAG_MAX_BYTES then
             file:close()
+            os.remove(DIAG_LOG .. ".1")
+            os.rename(DIAG_LOG, DIAG_LOG .. ".1")
             file = io.open(DIAG_LOG, "w")
             if not file then return end
         end
@@ -54,6 +56,46 @@ local function battery_text()
         return string.format("battery %d%%%s", power:getCapacity(), power:isCharging() and " (charging)" or "")
     end)
     return ok and value or "battery unknown"
+end
+
+-- Memory use of this process and the whole device, read from /proc. A steady climb before an
+-- unexplained exit points at memory; a flat line points at something else ending the process.
+local LOW_MEMORY_KB = 48 * 1024
+
+local function memory_info()
+    local info = {}
+    pcall(function()
+        for line in io.lines("/proc/self/status") do
+            local rss = line:match("^VmRSS:%s+(%d+)")
+            if rss then info.rss_kb = tonumber(rss) end
+            local threads = line:match("^Threads:%s+(%d+)")
+            if threads then info.threads = tonumber(threads) end
+        end
+        local free, buffers, cached
+        for line in io.lines("/proc/meminfo") do
+            local key, kb = line:match("^(%w+):%s+(%d+)")
+            if key == "MemAvailable" then info.available_kb = tonumber(kb)
+            elseif key == "MemFree" then free = tonumber(kb)
+            elseif key == "Buffers" then buffers = tonumber(kb)
+            elseif key == "Cached" then cached = tonumber(kb) end
+        end
+        info.available_kb = info.available_kb or ((free or 0) + (buffers or 0) + (cached or 0))
+        local uptime = io.open("/proc/uptime", "r")
+        if uptime then
+            info.uptime_s = tonumber((uptime:read("*l") or ""):match("^(%d+)"))
+            uptime:close()
+        end
+    end)
+    info.lua_kb = collectgarbage("count")
+    return info
+end
+
+local function memory_text(info)
+    info = info or memory_info()
+    local function mb(kb) return kb and string.format("%d", kb / 1024) or "?" end
+    return string.format("rss %s MB, device free %s MB, lua %d KB, threads %s, uptime %s min",
+        mb(info.rss_kb), mb(info.available_kb), info.lua_kb, tostring(info.threads or "?"),
+        info.uptime_s and string.format("%d", info.uptime_s / 60) or "?")
 end
 
 -- KOReader exits when a scheduled task or paint raises a Lua error, which on a Kindle
@@ -683,8 +725,14 @@ function Sky:refresh()
     UIManager:scheduleIn(self.settings.refresh_seconds, self.refresh_task)
     self.refresh_ticks = (self.refresh_ticks or 0) + 1
     if self.refresh_ticks % 15 == 1 then
-        diag("heartbeat", string.format("tick %d, %s, wifi %s", self.refresh_ticks, battery_text(),
-            NetworkMgr:isConnected() and "up" or "down"))
+        diag("heartbeat", string.format("tick %d, %s, wifi %s, %s", self.refresh_ticks, battery_text(),
+            NetworkMgr:isConnected() and "up" or "down", memory_text()))
+    elseif self.refresh_ticks % 5 == 0 then
+        -- Every ten minutes while free memory is low, so the minutes before a kill are on record.
+        local info = memory_info()
+        if info.available_kb and info.available_kb < LOW_MEMORY_KB then
+            diag("low memory", memory_text(info))
+        end
     end
     self.satellites = self.catalog and Satellites.overhead(self.catalog, os.time(),
         self.settings.lat, self.settings.lon, 10) or nil
@@ -703,6 +751,9 @@ function Sky:refresh()
         guarded("data update", function() self:refreshData() end, function()
             if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
         end)()
+        -- TLS contexts hold native memory the Lua collector does not count, so collect after each
+        -- round of requests instead of waiting for Lua's own heap to grow.
+        collectgarbage("collect")
         NetworkMgr:afterWifiAction()
     end)
 end
