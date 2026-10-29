@@ -8,8 +8,8 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 
 - A home view with nearby aircraft, radar, a featured aircraft, and a satellite currently high in the sky.
 - Aircraft details with reported callsign, type, registration, distance, bearing, altitude, and speed, plus a heading dial, a climb or descent marker (when the feed reports a vertical rate), and whether the aircraft is approaching, crossing or moving away. The featured aircraft is ringed and labelled on the radar so it is easy to match to the detail panel.
-- A satellite view with a local sky map and up to three satellites above 10° elevation, plus a cautious sunlight and twilight visibility hint. The ISS appears when it is above your saved location; its solar-array diagram remains available when featured.
-- A location-dependent train view with a simple railcar diagram: approximate SEPTA Regional Rail train positions near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
+- A satellite view with a local sky map and up to three satellites above 10° elevation, plus a cautious sunlight and twilight visibility hint. The ISS appears when it is above your saved location.
+- A location-dependent train view with a line badge on each train: approximate SEPTA Regional Rail train positions and delays near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
 - Automatic Home → Aircraft → Satellites → Trains view changes every 90 seconds where a train feed is supported. When several aircraft are nearby, Aircraft turns favor emergency, reported military, and selected unusual types while avoiding consecutive repeats where possible. A newly detected emergency opens its detail view immediately.
 - Data-age and **STALE** indicators when a feed stops updating. The display keeps the Kindle awake while it runs and restores normal sleep behavior when closed.
 
@@ -29,7 +29,7 @@ Keep your own coordinates and Kindle settings out of public issues and pull requ
 
 Kindle Horizon has been tested on one older Kindle with KOReader. Other models and firmware versions may need layout or launch adjustments. **Auto** uses the device zone when KOReader reports a non-UTC zone, then falls back to Eastern; change it in the menu if that does not match your location. The aircraft, satellite, and train views use saved coordinates; the Kindle does not detect its physical location. Satellite directions and SEPTA train positions are approximate. TfL data is station arrival predictions, not train positions.
 
-The plugin source and vector-like raster diagrams are original to this project. KOReader, the launcher used to start it, and the live data services are separate third-party projects. Their binaries are not included in this repository. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for attribution and service terms.
+The plugin source and the on-screen diagrams are original to this project. KOReader, the launcher used to start it, and the live data services are separate third-party projects. Their binaries are not included in this repository. See [data sources and limitations](docs/DATA_AND_LIMITS.md) for attribution and service terms.
 
 ## License
 
