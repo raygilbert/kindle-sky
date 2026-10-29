@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kindle Horizon</title>
+<meta name="description" content="Kindle Horizon is a KOReader plugin that shows nearby aircraft, satellites and trains on a jailbroken Kindle.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+/* Hallmark · shape: Feature Stack · genre: modern-minimal · theme: Wayfind (deal 1/3, seed kindle-horizon-open-source-koreader-a13f·424d1f89·2026-10-29·r0) · job: try · draw: feda6b
+ * hero: Stage (swapped from the drawn Corridor: the real screen leads) · nav: edge-aligned · footer: statement · imagery: product renders 5, drawn by the plugin’s own code at 2x · signature: the real Home screen, large, in the hero · wayfind: platform
+ * axes: light/mono/cool · posture: committed · contrast: pass · fold: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, the stack is a switcher, a split, a table and a split again; the table sits between the two splits so no neighbours repeat */
+@import url("./tokens.css");
+@import url("./base.css");
+
+:root { --nav-h: 4.625rem; }
+
+.skip { position: absolute; left: var(--space-md); top: calc(-1 * var(--space-3xl)); z-index: var(--z-toast); padding: var(--space-xs) var(--space-md); background: var(--color-ink); color: var(--color-paper); }
+.skip:focus-visible { top: var(--space-md); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: var(--space-xs); min-height: 52px; padding: 0 var(--space-lg); border: var(--rule-bar) solid currentColor; background: transparent; color: var(--color-ink); font: 800 var(--text-md)/1 var(--font-body); white-space: nowrap; text-decoration: none; cursor: pointer; transition: background-color var(--dur-micro) steps(1); }
+.btn:hover { background: var(--color-paper-2); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; transform: none; }
+.btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); }
+.btn--primary:hover { background: var(--color-ink); border-color: var(--color-ink); }
+
+/* Nav: edge-aligned, the wordmark and one link */
+.nav { border-bottom: var(--rule-bar) solid var(--color-ink); background: var(--color-paper); }
+.nav .container { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); min-height: var(--nav-h); }
+.wordmark { white-space: nowrap; font-weight: 800; font-size: var(--text-lg); letter-spacing: var(--tracking-display); text-decoration: none; }
+.nav a:not(.wordmark) { white-space: nowrap; font-weight: 500; font-size: var(--text-sm); }
+.nav a:not(.wordmark):hover { color: var(--color-accent); }
+
+/* Hero: Stage, the real screen on seven columns */
+.hero { min-height: calc(100svh - var(--nav-h)); display: grid; align-items: center; padding-block: var(--space-2xl); }
+.hero .container { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-2xl); align-items: center; }
+.hero h1 { font-size: min(var(--text-display), 4.75rem); }
+.hero .lead { margin-top: var(--space-lg); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-top: var(--space-xl); }
+
+/* A screen: the Kindle's own picture in a square 2px frame */
+.screen { margin: 0; }
+.frame { aspect-ratio: 4 / 3; border: var(--rule-bar) solid var(--color-ink); background: var(--color-paper-3); }
+.screen figcaption { margin-top: var(--space-sm); font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); }
+
+/* Switcher on the ink band */
+.band--ink { background: var(--color-ink); color: var(--color-paper); }
+.section { padding-block: var(--section-gap-s); }
+.section[data-tight] { padding-top: 0; }
+.head--solo { grid-template-columns: minmax(0, 1fr); }
+.head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-2xl); align-items: end; margin-bottom: var(--space-2xl); }
+.head .lead { max-width: 40ch; }
+.band--ink .lead { color: var(--color-rule); }
+.seg { display: flex; flex-wrap: wrap; margin: 0 0 var(--space-xl); padding: 0; border: 0; }
+.seg button { min-height: 52px; padding: 0 var(--space-lg); margin-right: calc(-1 * var(--rule-bar)); border: var(--rule-bar) solid var(--color-paper); background: transparent; color: var(--color-paper); font: 800 var(--text-md)/1 var(--font-body); cursor: pointer; transition: background-color var(--dur-micro) steps(1); }
+.seg button:hover { background: var(--color-ink-2); }
+.seg button[aria-selected="true"] { background: var(--color-paper); color: var(--color-ink); }
+.seg button:focus-visible { position: relative; z-index: var(--z-raised); outline: 2px solid var(--color-accent-2); outline-offset: 2px; }
+.pane { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: var(--gap-columns); align-items: stretch; }
+.pane + .pane { margin-top: var(--space-2xl); }
+.band--ink .frame { border-color: var(--color-paper); }
+.band--ink .screen figcaption { color: var(--color-rule); }
+.plate { display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-xl); padding: var(--space-xl); background: var(--color-accent-2); color: var(--color-ink); border: var(--rule-bar) solid var(--color-accent-2); }
+.plate h3 { font-size: var(--text-title); }
+.plate .figure { font-variant-numeric: tabular-nums; display: block; font-size: var(--text-display-s); font-weight: 800; line-height: 1; letter-spacing: var(--tracking-display); }
+.plate .unit { display: block; margin-top: var(--space-xs); font-size: var(--text-sm); font-weight: 500; }
+.plate p { font-size: var(--text-md); }
+.note { margin-top: var(--space-xl); font-size: var(--text-sm); font-weight: 500; color: var(--color-rule); }
+
+/* Split: a crop of the radar */
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-2xl); align-items: center; }
+.split .lead { margin-top: var(--space-lg); }
+.facts { margin: var(--space-xl) 0 0; padding: 0; }
+.facts div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-md); padding-block: var(--space-md); border-top: var(--rule-hair) solid var(--color-rule); }
+.facts dt { font-weight: 800; }
+.facts dd { margin: 0; }
+.crop .frame { aspect-ratio: 400 / 390; }
+
+/* Table: what it needs */
+.needs { width: 100%; border-collapse: collapse; border-top: var(--rule-bar) solid var(--color-ink); }
+.needs th, .needs td { padding-block: var(--space-lg); text-align: left; vertical-align: baseline; border-bottom: var(--rule-hair) solid var(--color-rule); }
+.needs th { width: 22%; font-size: var(--text-title); font-weight: 800; padding-right: var(--space-lg); }
+.needs td { font-size: var(--text-lg); }
+
+/* Close: the install beside one last screen */
+.close { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-2xl); align-items: center; }
+.steps { margin: var(--space-xl) 0 0; padding: 0; list-style: none; counter-reset: step; border-top: var(--rule-bar) solid var(--color-ink); }
+.steps li { counter-increment: step; display: grid; grid-template-columns: var(--space-xl) minmax(0, 1fr); gap: var(--space-md); padding-block: var(--space-md); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.steps li::before { content: counter(step); font-weight: 800; font-variant-numeric: tabular-nums; }
+.close .actions { margin-top: var(--space-xl); }
+
+/* Footer: a statement, then the links */
+.foot { padding-block: var(--section-gap-s); }
+.foot .say { max-width: 18ch; font-size: var(--text-display-s); font-weight: 800; line-height: 1; letter-spacing: var(--tracking-display); text-wrap: balance; }
+.foot nav { display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-xl); margin-top: var(--space-2xl); }
+.foot nav a { font-weight: 500; }
+.foot nav a:hover { color: var(--color-accent-2); }
+.foot .colophon { margin-top: var(--space-xl); max-width: 64ch; font-size: var(--text-sm); color: var(--color-rule); }
+
+@media (max-width: 60rem) {
+  .hero { min-height: 0; }
+  .hero .container, .head, .pane, .split, .close { grid-template-columns: minmax(0, 1fr); gap: var(--space-xl); }
+  .head { align-items: start; margin-bottom: var(--space-xl); }
+  .head--solo { grid-template-columns: minmax(0, 1fr); }
+  .needs th { width: 30%; }
+}
+@media (max-width: 40rem) {
+  .needs, .needs tbody, .needs tr, .needs th, .needs td { display: block; width: 100%; }
+  .needs tr { padding-block: var(--space-md); border-bottom: var(--rule-hair) solid var(--color-rule); }
+  .needs th, .needs td { padding-block: 0; border-bottom: 0; }
+  .needs td { margin-top: var(--space-2xs); font-size: var(--text-md); }
+  .seg button { flex: 1 1 auto; padding: 0 var(--space-md); }
+}
+@media (prefers-reduced-motion: reduce) { .btn, .seg button { transition: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="container">
+    <a class="wordmark" href="#top" aria-label="Kindle Horizon, top of page">Kindle Horizon</a>
+    <a href="https://github.com/raygilbert/kindle-sky">GitHub</a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="container">
+      <div>
+        <h1>The sky above you, on e-ink.</h1>
+        <p class="lead">A KOReader plugin that puts aircraft, satellites and trains on a Kindle.</p>
+        <div class="actions">
+          <a class="btn btn--primary" href="https://github.com/raygilbert/kindle-sky">View on GitHub</a>
+          <a class="btn" href="https://github.com/raygilbert/kindle-sky/blob/main/docs/INSTALLATION.md">Installation guide</a>
+        </div>
+      </div>
+      <figure class="screen">
+        <div class="frame" data-slot="hero" data-kind="product" data-alt="The Kindle Horizon home screen: a radar of nearby aircraft, the featured aircraft and the highest satellite">
+          <img src="img/home.png" width="1600" height="1200" alt="The home screen: a radar of nearby aircraft on the left, the featured military helicopter G26042 with a heading dial on the right, and the ISS in a small sky map below" fetchpriority="high">
+        </div>
+        <figcaption>The home screen: radar, the featured aircraft and the highest satellite.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section band--ink" aria-labelledby="screens-h">
+    <div class="container">
+      <div class="head">
+        <h2 id="screens-h">Aircraft, satellites, trains.</h2>
+        <p class="lead">It cycles through them on its own, or you tap to pick one.</p>
+      </div>
+      <div data-switch>
+        <div class="seg" role="tablist" aria-label="Screens">
+          <button type="button" role="tab" id="t-air" aria-selected="true" aria-controls="p-air">Aircraft</button>
+          <button type="button" role="tab" id="t-sat" aria-selected="false" aria-controls="p-sat" tabindex="-1">Satellites</button>
+          <button type="button" role="tab" id="t-rail" aria-selected="false" aria-controls="p-rail" tabindex="-1">Trains</button>
+        </div>
+                <div class="pane" role="tabpanel" id="p-air" aria-labelledby="t-air">
+          <figure class="screen">
+        <div class="frame" data-slot="aircraft" data-kind="product" data-alt="The aircraft screen: callsign, type, altitude and speed beside a heading dial and a radar">
+          <img src="img/aircraft.png" width="1600" height="1200" alt="The aircraft screen: helicopter G26042 at 10.6 nautical miles, 600 feet, with a heading dial reading 070 and a radar with the aircraft ringed" loading="lazy">
+        </div>
+      </figure>
+          <div class="plate">
+            <div><span class="figure">40 nm</span><span class="unit">default radar range</span></div>
+            <div><h3>Aircraft</h3><p>Callsign, type, registration, altitude and speed, with a heading dial beside the radar.</p></div>
+          </div>
+        </div>
+        <div class="pane" role="tabpanel" id="p-sat" aria-labelledby="t-sat">
+          <figure class="screen">
+        <div class="frame" data-slot="satellites" data-kind="product" data-alt="The satellites screen: three satellites listed beside a sky map">
+          <img src="img/satellites.png" width="1600" height="1200" alt="The satellites screen: the ISS and two other satellites listed with direction, height and range, beside a sky map with north at the top" loading="lazy">
+        </div>
+      </figure>
+          <div class="plate">
+            <div><span class="figure">10°</span><span class="unit">lowest height shown</span></div>
+            <div><h3>Satellites</h3><p>A sky map of up to three satellites, and the ISS when it passes over you.</p></div>
+          </div>
+        </div>
+        <div class="pane" role="tabpanel" id="p-rail" aria-labelledby="t-rail">
+          <figure class="screen">
+        <div class="frame" data-slot="trains" data-kind="product" data-alt="The trains screen: three SEPTA Regional Rail trains with line badges and delay bars">
+          <img src="img/rail.png" width="1600" height="1200" alt="The trains screen: three SEPTA Regional Rail trains, each with a three-letter line badge, its destination, and a bar showing how many minutes late it is" loading="lazy">
+        </div>
+      </figure>
+          <div class="plate">
+            <div><span class="figure">2</span><span class="unit">rail feeds, SEPTA and TfL</span></div>
+            <div><h3>Trains</h3><p>Each SEPTA train gets a line badge and a delay bar. London shows arrival minutes.</p></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Screens are drawn by the plugin’s own code, with sample data.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ring-h">
+    <div class="container split">
+      <div>
+        <h2 id="ring-h">Ringed on the radar.</h2>
+        <p class="lead">The featured aircraft gets a ring and its callsign, so you can match the dot to the panel.</p>
+        <dl class="facts">
+          <div><dt>Heading</dt><dd>A dial shows which way it is flying.</dd></div>
+          <div><dt>Climb</dt><dd>A marker shows climb or descent, when the feed reports it.</dd></div>
+          <div><dt>Approach</dt><dd>Approaching, crossing or moving away, from where you are.</dd></div>
+        </dl>
+      </div>
+      <figure class="screen crop">
+        <div class="frame" data-slot="radar" data-kind="product" data-alt="A close crop of the aircraft screen: the heading dial and the radar with the featured aircraft ringed">
+          <img src="img/radar-crop.png" width="800" height="780" alt="A close crop of the aircraft screen: a heading dial showing 070 with the words climbing and approaching, above a radar with the featured aircraft ringed and labelled G26042" loading="lazy">
+        </div>
+        <figcaption>The heading dial and the radar, enlarged.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="needs-h" data-tight>
+    <div class="container">
+      <div class="head head--solo">
+        <h2 id="needs-h">What it needs.</h2>
+      </div>
+      <table class="needs">
+        <caption class="visually-hidden">What Kindle Horizon needs</caption>
+        <tbody>
+          <tr><th scope="row">Kindle</th><td>A jailbroken Kindle with KOReader. Tested on one older model.</td></tr>
+          <tr><th scope="row">Network</th><td>Wi-Fi for live data. A power source is recommended.</td></tr>
+          <tr><th scope="row">Location</th><td>Your own latitude and longitude, entered in the menu.</td></tr>
+          <tr><th scope="row">Rail</th><td>SEPTA near Philadelphia, TfL near London. Elsewhere, no train screen.</td></tr>
+          <tr><th scope="row">Data</th><td>adsb.fi for aircraft, CelesTrak for satellites. Personal, non-commercial use.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="install-h" data-tight>
+    <div class="container close">
+      <div>
+        <h2 id="install-h">Copy one folder.</h2>
+        <ol class="steps">
+          <li>Install KOReader on a jailbroken Kindle.</li>
+          <li>Copy the kindlesky.koplugin folder, unrenamed, into koreader/plugins and restart.</li>
+          <li>Open Tools, Kindle Horizon, Set location and refresh.</li>
+          <li>Choose Start display.</li>
+        </ol>
+        <div class="actions">
+          <a class="btn btn--primary" href="https://github.com/raygilbert/kindle-sky">View on GitHub</a>
+        </div>
+      </div>
+      <figure class="screen">
+        <div class="frame" data-slot="london" data-kind="product" data-alt="The trains screen for London: three Underground and Elizabeth line arrivals with minutes to go">
+          <img src="img/london.png" width="1600" height="1200" alt="The London trains screen: Central line to Ealing Broadway in 2 minutes, Northern line to Morden in 5, Elizabeth line to Reading in 9" loading="lazy">
+        </div>
+        <figcaption>In London it shows arrival minutes at the nearest station.</figcaption>
+      </figure>
+    </div>
+  </section>
+</main>
+
+<footer class="band--ink foot">
+  <div class="container">
+    <p class="say">Look up from the desk.</p>
+    <nav aria-label="Project links">
+      <a href="https://github.com/raygilbert/kindle-sky">Source</a>
+      <a href="https://github.com/raygilbert/kindle-sky/blob/main/docs/INSTALLATION.md">Installation guide</a>
+      <a href="https://github.com/raygilbert/kindle-sky/blob/main/docs/DATA_AND_LIMITS.md">Data and limits</a>
+      <a href="https://github.com/raygilbert/kindle-sky/blob/main/LICENSE">MIT licence</a>
+    </nav>
+    <p class="colophon">Aircraft from adsb.fi, satellites from CelesTrak, rail from SEPTA and TfL. Kindle Horizon is an independent plugin and is not part of KOReader.</p>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.add('js');
+(function () {
+  var root = document.querySelector('[data-switch]');
+  if (!root) return;
+  var tabs = Array.prototype.slice.call(root.querySelectorAll('[role="tab"]'));
+  var panes = Array.prototype.slice.call(root.querySelectorAll('[role="tabpanel"]'));
+  function show(i, focus) {
+    tabs.forEach(function (t, n) {
+      var on = n === i;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      panes[n].hidden = !on;
+    });
+    if (focus) tabs[i].focus();
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { show(i, false); });
+    t.addEventListener('keydown', function (e) {
+      var n = tabs.length;
+      if (e.key === 'ArrowRight') { e.preventDefault(); show((i + 1) % n, true); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); show((i + n - 1) % n, true); }
+      if (e.key === 'Home') { e.preventDefault(); show(0, true); }
+      if (e.key === 'End') { e.preventDefault(); show(n - 1, true); }
+    });
+  });
+  show(0, false);
+})();
+</script>
+<script>window.hallmarkSlots = (m) => { for (const [k, v] of Object.entries(m)) { const s = document.querySelector(`[data-slot="${k}"]`); if (!s) continue; const im = new Image(); im.src = typeof v === 'string' ? v : v.src; im.alt = (typeof v === 'object' && v.alt) || s.dataset.alt || ''; s.querySelectorAll(':scope > img').forEach((o) => o.remove()); s.prepend(im); } };
+document.querySelectorAll('[data-slot] img').forEach((i) => { if (i.complete && !i.naturalWidth) i.remove(); else i.addEventListener('error', () => i.remove(), { once: true }); });</script>
+</body>
+</html>
