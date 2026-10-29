@@ -108,8 +108,31 @@ end
 
 function Visuals.paintAircraft(bb, x, y, width, height, aircraft, black, white)
     local kind, label = Visuals.aircraftKind(aircraft)
-    polygon(bb, outlines[kind], x, y, width, height, black)
     white = white or require("ffi/blitbuffer").COLOR_WHITE
+    if kind == "helicopter" then
+        -- Draw in a true square so the cabin and tail boom keep their proportions
+        -- whatever box the caller gives us.
+        local s = math.min(width, height)
+        local sx, sy = math.floor(x + (width - s) / 2), math.floor(y + (height - s) / 2)
+        local function px(v) return sx + s * v / 100 end
+        local function py(v) return sy + s * v / 100 end
+        -- Cabin: rounded nose at the top, tapering into the tail boom.
+        polygon(bb, {
+            {50,8},{58,12},{63,22},{64,38},{60,54},{55,62},{54,66},
+            {53,66},{53,90},{47,90},{47,66},{45,66},{40,54},{36,38},{37,22},{42,12},
+        }, sx, sy, s, s, black)
+        -- Tail stabiliser.
+        bb:paintRect(math.floor(px(38)), math.floor(py(86)), math.max(3, math.floor(s * 0.24)),
+            math.max(2, math.floor(s * 0.04)), black)
+        -- Cockpit glazing, ahead of the rotor mast.
+        bb:paintRect(math.floor(px(42)), math.floor(py(17)), math.max(4, math.floor(s * 0.16)),
+            math.max(2, math.floor(s * 0.08)), white)
+        -- Main rotor: one blade line across the cabin, behind the windscreen.
+        local t = math.max(2, math.floor(s * 0.035))
+        bb:paintRect(math.floor(px(2)), math.floor(py(44) - t / 2), math.floor(s * 0.96), t, black)
+        return kind, label
+    end
+    polygon(bb, outlines[kind], x, y, width, height, black)
     -- Cockpit glazing and surface marks stay chunky enough for the small Home view.
     if kind ~= "helicopter" and width >= 100 then
         bb:paintRect(math.floor(x + width * 0.47), math.floor(y + height * 0.15),
