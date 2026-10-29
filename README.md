@@ -1,5 +1,7 @@
 # Kindle Horizon
 
+**[Project page](https://raygilbert.github.io/kindle-sky/)** · [Installation](docs/INSTALLATION.md) · [Data and limits](docs/DATA_AND_LIMITS.md)
+
 Kindle Horizon turns a jailbroken Kindle running [KOReader](https://github.com/koreader/koreader) into an e-ink desk display for nearby aircraft, satellites above your saved location, and supported local rail feeds. It runs on the Kindle itself; no companion computer is needed after installation. Wi-Fi is required for live data.
 
 The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/eink/comments/1xbw3xi/i_built_an_epaper_desk_display_that_shows_nearby/). Kindle Horizon is an independent KOReader plugin, not a port of that project's code.
