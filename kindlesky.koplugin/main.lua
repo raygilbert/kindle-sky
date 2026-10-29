@@ -257,15 +257,20 @@ function Dashboard:paintContent(bb, x, y)
     text(bb, hint, 24, H - 33, 16)
 end
 
+local function trainBadge(bb, x, y, line)
+    bb:paintRect(x, y, 76, 46, BLACK)
+    bb:paintRect(x + 3, y + 3, 70, 40, WHITE)
+    text(bb, Visuals.lineBadge(line), x + 9, y + 8, 24, 62, true)
+end
+
 function Dashboard:paintTrains(bb)
     local app, provider, trains = self.owner, self.owner.train_provider, self.owner.trains
     local wide = W > H
-    Visuals.paintTrain(bb, W - (wide and 268 or 208), 128, wide and 244 or 184, 61,
-        provider, BLACK, WHITE)
+    local right_x, bar_w = W - 24 - 176, 176
     if provider == "septa" then
-        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - (wide and 284 or 224), true)
+        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - 48, true)
         text(bb, string.format("%d trains within %d nm  /  positions approximate", #(trains or {}),
-            app.settings.radius_nm), 24, 165, 18, W - (wide and 284 or 224))
+            app.settings.radius_nm), 24, 165, 18, W - 48)
         if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
         if not trains then
             text(bb, "Waiting for nearby trains", 24, 245, 24, W - 48)
@@ -275,21 +280,28 @@ function Dashboard:paintTrains(bb)
             local count = math.min(#trains, wide and 4 or 6)
             for i = 1, count do
                 local train, y = trains[i], 215 + (i - 1) * (wide and 75 or 85)
-                text(bb, "#" .. train.number .. "  " .. train.line, 24, y, 23, W - 48, true)
-                text(bb, string.format("To %s  /  %.1f nm  /  %s",
-                    train.destination, train.distance_nm,
-                    train.delay and (train.delay > 0 and train.delay .. " min late" or "on time") or "delay unknown"),
-                    24, y + 29, 18, W - 48)
-                if train.next_stop ~= "" and wide then
-                    text(bb, "Next: " .. train.next_stop, 24, y + 52, 16, W - 48)
+                trainBadge(bb, 24, y, train.line)
+                text(bb, "To " .. train.destination, 116, y - 2, 23, right_x - 130, true)
+                text(bb, string.format("#%s  /  %.1f nm away", train.number, train.distance_nm),
+                    116, y + 28, 17, right_x - 130)
+                text(bb, train.line .. (train.next_stop ~= "" and ("  /  next: " .. train.next_stop) or ""),
+                    116, y + 50, 15, W - 140)
+                local delay = train.delay
+                text(bb, delay and (delay > 0 and (delay .. " min late") or "on time") or "delay unknown",
+                    right_x, y - 2, 21, bar_w, delay ~= nil and delay > 0)
+                -- Delay bar: full width is 15 minutes or more late.
+                bb:paintRect(right_x, y + 30, bar_w, 12, BLACK)
+                bb:paintRect(right_x + 2, y + 32, bar_w - 4, 8, WHITE)
+                if delay and delay > 0 then
+                    bb:paintRect(right_x + 2, y + 32, math.floor((bar_w - 4) * math.min(delay, 15) / 15), 8, BLACK)
                 end
             end
         end
     else
         local stop = app.train_stop
-        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - (wide and 284 or 224), true)
+        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - 48, true)
         text(bb, stop and (stop.name .. string.format("  /  %.1f km away", stop.distance_km))
-            or "Finding the nearest station", 24, 165, 19, W - (wide and 284 or 224))
+            or "Finding the nearest station", 24, 165, 19, W - 48)
         if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
         if not trains then
             text(bb, "Waiting for arrival predictions", 24, 245, 24, W - 48)
@@ -299,9 +311,11 @@ function Dashboard:paintTrains(bb)
             local count = math.min(#trains, wide and 5 or 7)
             for i = 1, count do
                 local train, y = trains[i], 215 + (i - 1) * (wide and 61 or 70)
-                text(bb, string.format("%2d min  %s", train.minutes, train.line), 24, y, 22, W - 48, true)
-                text(bb, "To " .. train.destination ..
-                    (train.platform ~= "" and ("  /  " .. train.platform) or ""), 24, y + 27, 18, W - 48)
+                trainBadge(bb, 24, y, train.line)
+                text(bb, "To " .. train.destination, 116, y - 2, 22, right_x - 130, true)
+                text(bb, train.line .. (train.platform ~= "" and ("  /  " .. train.platform) or ""),
+                    116, y + 26, 17, right_x - 130)
+                text(bb, string.format("%d min", train.minutes), right_x, y + 2, 28, bar_w, true)
             end
         end
         text(bb, "Station predictions, not train positions", 24, H - 100, 17, W - 48)
@@ -324,8 +338,18 @@ function Dashboard:paintRadar(bb, ac, cx, cy, radius, range_nm, selected_index)
         local px = math.floor(cx + math.sin(bearing) * distance * radius)
         local py = math.floor(cy - math.cos(bearing) * distance * radius)
         self.radar_dots[#self.radar_dots + 1] = { x = px, y = py, index = i }
-        local size = i == selected_index and 9 or 6
+        local selected = i == selected_index
+        local size = selected and 11 or 6
         bb:paintRect(px - math.floor(size / 2), py - math.floor(size / 2), size, size, BLACK)
+        if selected then
+            -- Ring and callsign tie the dot to the detail panel next to the radar.
+            ring(bb, px, py, 14, BLACK)
+            local label = a.flight ~= "" and a.flight or (a.registration ~= "" and a.registration or a.id)
+            local label_w = 9 * #label + 8
+            local label_x = px > cx and (px - 19 - label_w) or (px + 19)
+            bb:paintRect(label_x - 2, py - 11, label_w + 4, 20, WHITE)
+            text(bb, label, label_x, py - 11, 14, label_w, true)
+        end
         if a.heading then
             local head = math.rad(a.heading)
             local tipx = math.floor(px + math.sin(head) * 13)
@@ -333,8 +357,49 @@ function Dashboard:paintRadar(bb, ac, cx, cy, radius, range_nm, selected_index)
             line(bb, px, py, tipx, tipy, BLACK)
         end
     end
-    for i = 1, math.min(#ac, 24) do drawAircraft(i) end
-    if selected_index and selected_index > 24 and ac[selected_index] then drawAircraft(selected_index) end
+    for i = 1, math.min(#ac, 24) do
+        if i ~= selected_index then drawAircraft(i) end
+    end
+    -- The selected aircraft goes last so nothing paints over its ring and label.
+    if selected_index and ac[selected_index] then drawAircraft(selected_index) end
+end
+
+-- Heading dial for one aircraft, with the plain-language reading beside or below it.
+function Dashboard:paintHeading(bb, plane, cx, cy, radius, label_x, label_y, label_w, line_h, size)
+    Visuals.paintCompass(bb, cx, cy, radius, plane.heading, BLACK)
+    text(bb, "N", cx - 6, cy - radius - math.floor(size * 1.5), size - 2, 20, true)
+    text(bb, plane.heading and string.format("HDG %03d deg", math.floor(plane.heading + 0.5) % 360) or "HDG --",
+        label_x, label_y, size, label_w, true)
+    local direction, climb = Data.climb(plane.vrate_fpm)
+    if climb then
+        local marker = math.floor(size * 0.8)
+        Visuals.paintTrend(bb, label_x, label_y + line_h + math.floor((size - marker) / 2) + 2, marker, direction, BLACK)
+        text(bb, climb, label_x + marker + 6, label_y + line_h, size, label_w - marker - 6)
+    end
+    local motion = Data.motion(plane.heading, plane.bearing)
+    if motion then text(bb, motion, label_x, label_y + 2 * line_h, size, label_w, true) end
+end
+
+-- Small sky disc for the Home view: the featured satellite is the big square, the rest are dots.
+function Dashboard:paintMiniSky(bb, overhead, feature, cx, cy, radius)
+    Visuals.paintCompass(bb, cx, cy, radius, nil, BLACK)
+    ring(bb, cx, cy, math.floor(radius / 2), GRAY)
+    bb:paintRect(cx - 1, cy - radius, 2, radius * 2, GRAY)
+    bb:paintRect(cx - radius, cy - 1, radius * 2, 2, GRAY)
+    text(bb, "N", cx - 6, cy - radius - 22, 14, 20, true)
+    local function mark(sat, size)
+        local distance = (90 - math.min(90, sat.elevation)) / 90 * radius
+        local bearing = math.rad(sat.bearing)
+        local px = math.floor(cx + math.sin(bearing) * distance)
+        local py = math.floor(cy - math.cos(bearing) * distance)
+        bb:paintRect(px - math.floor(size / 2), py - math.floor(size / 2), size, size, BLACK)
+    end
+    for i = 1, math.min(#overhead, 12) do
+        if overhead[i] ~= feature then mark(overhead[i], 5) end
+    end
+    if feature then
+        mark(feature, 13)
+    end
 end
 
 function Dashboard:paintHome(bb)
@@ -348,23 +413,22 @@ function Dashboard:paintHome(bb)
     local tx, top, column_width = landscape and 411 or 24, landscape and 128 or 412, landscape and 355 or W - 48
     if landscape then bb:paintRect(392, 121, 2, 270, GRAY) end
     local feature_label = first and (first.emergency and "EMERGENCY" or (first.military and "MILITARY"
-        or (first.rare and "UNUSUAL AIRCRAFT" or "FEATURED AIRCRAFT"))) or "FEATURED AIRCRAFT"
-    text(bb, (app.aircraft_error and "STALE / " or "") .. feature_label, tx, top, 19, column_width, true)
+        or (first.rare and "UNUSUAL" or "FEATURED"))) or "FEATURED AIRCRAFT"
+    if first then feature_label = feature_label .. "  /  " .. select(2, Visuals.aircraftKind(first)):upper() end
+    text(bb, (app.aircraft_error and "STALE / " or "") .. feature_label, tx, top, 18, column_width, true)
     if first then
         local name = first.flight ~= "" and first.flight or (first.registration ~= "" and first.registration or first.id)
-        local visual_x, visual_y = landscape and 650 or 440, landscape and 160 or 453
-        local visual_w, visual_h = landscape and 110 or 110, landscape and 47 or 60
-        local visual_label = Visuals.paintAircraft(bb, visual_x, visual_y, visual_w, visual_h, first, BLACK, WHITE)
-        text(bb, visual_label, visual_x - 8, visual_y + visual_h + 2, 15, 130)
-        text(bb, name, tx, top + 37, landscape and 38 or 34, landscape and 225 or 390, true)
+        local text_w = landscape and 235 or 390
+        text(bb, name, tx, top + 37, landscape and 38 or 34, text_w, true)
         text(bb, (first.model ~= "" and first.model or "Unknown type") .. "  " .. first.registration,
-            tx, top + 89, 21, landscape and 225 or 390)
+            tx, top + 89, 21, text_w)
         text(bb, string.format("%.1f nm  /  %03d deg", first.distance_nm, first.bearing),
-            tx, top + 128, 22, column_width)
+            tx, top + 128, 22, text_w)
         local altitude = first.altitude_ft and (tostring(math.floor(first.altitude_ft + 0.5)) .. " ft") or "-- ft"
         local speed = first.speed_kt and (tostring(math.floor(first.speed_kt + 0.5)) .. " kt") or "-- kt"
-        text(bb, altitude .. "  /  " .. speed, tx, top + 166, 21, column_width)
+        text(bb, altitude .. "  /  " .. speed, tx, top + 166, 21, text_w)
         if landscape then
+            self:paintHeading(bb, first, 705, 213, 46, 636, 272, 140, 22, 16)
             local nearest = first
             for _, plane in ipairs(ac) do
                 if plane.distance_nm < nearest.distance_nm then nearest = plane end
@@ -374,6 +438,8 @@ function Dashboard:paintHome(bb)
                 text(bb, string.format("Nearest: %s  %.1f nm", nearest_name, nearest.distance_nm),
                     tx, top + 210, 17, column_width)
             end
+        else
+            self:paintHeading(bb, first, 508, 495, 36, 436, 540, 150, 20, 16)
         end
     else
         text(bb, app.aircraft_error or "No aircraft in range", tx, top + 58, 21, column_width)
@@ -390,8 +456,11 @@ function Dashboard:paintHome(bb)
         text(bb, string.format("%03d deg direction  /  %.0f deg high", feature.bearing, feature.elevation),
             24, divider + (landscape and 86 or 76), landscape and 20 or 17,
             landscape and 590 or 410)
-        Visuals.paintSatellite(bb, landscape and 651 or 460, divider + 35,
-            landscape and 106 or 92, landscape and 52 or 38, feature.iss, BLACK, WHITE)
+        if landscape then
+            self:paintMiniSky(bb, overhead, feature, 705, 474, 44)
+        else
+            self:paintMiniSky(bb, overhead, feature, 520, 687, 34)
+        end
     else
         text(bb, app.satellite_error or "No catalog satellites high in the sky", 24,
             divider + 53, landscape and 21 or 18, W - 48)
@@ -423,8 +492,7 @@ function Dashboard:paintAircraft(bb)
     end
     rule(bb, 412)
     if first then
-        local label = Visuals.paintAircraft(bb, 100, 432, 400, 91, first, BLACK, WHITE)
-        text(bb, label .. " / representative shape", 24, 527, 16, W - 48)
+        self:paintHeading(bb, first, 90, 482, 44, 160, 452, 400, 26, 20)
     end
     text(bb, "RADAR", 24, 556, 17, W - 48, true)
     self:paintRadar(bb, ac, math.floor(W / 2), 637, 56, app.settings.radius_nm, app.selected_index or 1)
@@ -453,10 +521,9 @@ function Dashboard:paintAircraftLandscape(bb)
         text(bb, "No aircraft in range", 24, 210, 27, 350, true)
     end
     bb:paintRect(391, 122, 2, 383, GRAY)
-    text(bb, "WHAT IT LOOKS LIKE", 421, 126, 19, 350, true)
+    text(bb, "WHICH WAY IT IS GOING", 421, 126, 19, 350, true)
     if first then
-        local label = Visuals.paintAircraft(bb, 446, 158, 292, 111, first, BLACK, WHITE)
-        text(bb, label .. " / representative shape", 421, 273, 17, 350)
+        self:paintHeading(bb, first, 480, 214, 52, 560, 178, 210, 28, 19)
     end
     text(bb, "NEARBY RADAR", 421, 306, 18, 350, true)
     self:paintRadar(bb, ac, 592, 425, 64, app.settings.radius_nm, app.selected_index or 1)
@@ -494,9 +561,6 @@ function Dashboard:paintSatellites(bb)
     end
     text(bb, string.format("%d SATELLITES ABOVE 10 DEG", #overhead), 24, 126,
         wide and 23 or 22, wide and 355 or 400, true)
-    if featured and not wide then
-        Visuals.paintSatellite(bb, 459, 138, 110, 47, featured.iss, BLACK, WHITE)
-    end
     if not app.catalog then
         text(bb, app.satellite_error or "Waiting for orbital data", 24, 175, 21,
             wide and 350 or W - 48)
@@ -519,9 +583,6 @@ function Dashboard:paintSatellites(bb)
         bb:paintRect(391, 122, 2, 383, GRAY)
         text(bb, "YOUR SKY NOW", 432, 127, 20, 340, true)
         self:paintSatelliteSky(bb, overhead, 592, 297, 112)
-        if featured then
-            Visuals.paintSatellite(bb, 637, 438, 119, 48, featured.iss, BLACK, WHITE)
-        end
         text(bb, "Approximate positions / visibility is an estimate", 24, 485, 16, 590)
     else
         rule(bb, 453)

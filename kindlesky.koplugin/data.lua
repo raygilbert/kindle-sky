@@ -47,6 +47,7 @@ function Data.aircraft(response, lat, lon, radius_nm)
                         altitude_ft = ac.alt_baro == "ground" and 0 or tonumber(ac.alt_baro or ac.alt_geom),
                         speed_kt = tonumber(ac.gs),
                         heading = tonumber(ac.track),
+                        vrate_fpm = tonumber(ac.baro_rate or ac.geom_rate),
                         distance_nm = nm,
                         bearing = Data.bearing(lat, lon, alat, alon),
                         emergency = emergency,
@@ -63,6 +64,25 @@ function Data.aircraft(response, lat, lon, radius_nm)
         return a.distance_nm < b.distance_nm
     end)
     return found
+end
+
+-- Is the aircraft heading toward the observer, away, or across? bearing is the direction
+-- from the observer to the aircraft; heading is the aircraft's own track. nil when unknown.
+function Data.motion(heading, bearing)
+    if type(heading) ~= "number" or type(bearing) ~= "number" then return nil end
+    local diff = math.abs((heading - (bearing + 180) + 540) % 360 - 180)
+    if diff <= 60 then return "APPROACHING" end
+    if diff >= 120 then return "MOVING AWAY" end
+    return "CROSSING"
+end
+
+-- Climb or descent from a vertical rate in feet per minute. Under 300 fpm counts as level.
+function Data.climb(vrate_fpm)
+    if type(vrate_fpm) ~= "number" then return nil, nil end
+    local rounded = math.floor(math.abs(vrate_fpm) / 100 + 0.5) * 100
+    if rounded < 300 then return "level", "LEVEL" end
+    if vrate_fpm > 0 then return "up", string.format("+%d fpm", rounded) end
+    return "down", string.format("-%d fpm", rounded)
 end
 
 return Data
