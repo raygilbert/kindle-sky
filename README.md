@@ -7,7 +7,7 @@ The idea was inspired by [this e-paper desk display](https://www.reddit.com/r/ei
 ## What you see
 
 - A home view with nearby aircraft, radar, a featured aircraft, and a satellite currently high in the sky.
-- Aircraft details with reported callsign, type, registration, distance, bearing, altitude, speed, and a **representative** monochrome silhouette. Distinct outlines include widebody jets, airliners, business jets, light prop planes, turboprops, fighters, and helicopters. The silhouette is not a photo or an exact depiction of that registration.
+- Aircraft details with reported callsign, type, registration, distance, bearing, altitude, and speed, plus a heading dial, a climb or descent marker (when the feed reports a vertical rate), and whether the aircraft is approaching, crossing or moving away. The featured aircraft is ringed and labelled on the radar so it is easy to match to the detail panel.
 - A satellite view with a local sky map and up to three satellites above 10° elevation, plus a cautious sunlight and twilight visibility hint. The ISS appears when it is above your saved location; its solar-array diagram remains available when featured.
 - A location-dependent train view with a simple railcar diagram: approximate SEPTA Regional Rail train positions near Philadelphia, or TfL station arrival predictions near London. In other locations, the train view is omitted until a supported feed is added.
 - Automatic Home → Aircraft → Satellites → Trains view changes every 90 seconds where a train feed is supported. When several aircraft are nearby, Aircraft turns favor emergency, reported military, and selected unusual types while avoiding consecutive repeats where possible. A newly detected emergency opens its detail view immediately.
