@@ -492,7 +492,7 @@ function Dashboard:paintAircraft(bb)
     end
     rule(bb, 412)
     if first then
-        self:paintHeading(bb, first, 90, 482, 44, 160, 452, 400, 26, 20)
+        self:paintHeading(bb, first, 90, 497, 44, 160, 467, 400, 26, 20)
     end
     text(bb, "RADAR", 24, 556, 17, W - 48, true)
     self:paintRadar(bb, ac, math.floor(W / 2), 637, 56, app.settings.radius_nm, app.selected_index or 1)
@@ -523,7 +523,7 @@ function Dashboard:paintAircraftLandscape(bb)
     bb:paintRect(391, 122, 2, 383, GRAY)
     text(bb, "WHICH WAY IT IS GOING", 421, 126, 19, 350, true)
     if first then
-        self:paintHeading(bb, first, 480, 214, 52, 560, 178, 210, 28, 19)
+        self:paintHeading(bb, first, 480, 238, 52, 560, 198, 210, 28, 19)
     end
     text(bb, "NEARBY RADAR", 421, 306, 18, 350, true)
     self:paintRadar(bb, ac, 592, 425, 64, app.settings.radius_nm, app.selected_index or 1)
