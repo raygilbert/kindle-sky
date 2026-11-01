@@ -22,6 +22,7 @@ local _ = require("gettext")
 local plugin_dir = debug.getinfo(1, "S").source:match("^@(.*/)")
 local Data = dofile(plugin_dir .. "data.lua")
 local Visuals = dofile(plugin_dir .. "visuals.lua")
+local Splitflap = dofile(plugin_dir .. "splitflap.lua")
 local Time = dofile(plugin_dir .. "time.lua")
 local Rotation = dofile(plugin_dir .. "rotation.lua")
 local Trains = dofile(plugin_dir .. "trains.lua")
@@ -110,14 +111,63 @@ local function guarded(label, fn, on_error)
     end
 end
 
-local function text(bb, value, x, y, size, max_width, bold)
+local function text(bb, value, x, y, size, max_width, bold, color)
     local widget = TextWidget:new {
         text = tostring(value or ""),
         face = Font:getFace("cfont", size),
         max_width = max_width or W - x - 20,
         bold = bold or false,
+        fgcolor = color,
     }
     widget:paintTo(bb, x, y)
+    widget:free()
+end
+
+
+-- ---------- Flip board support ----------
+-- Glyph bitmaps are drawn once per glyph and colour and then blitted, so a repaint of the whole
+-- board costs a few hundred small blits instead of a few hundred text widgets.
+local FLAP_GLYPH_LIMIT = 160
+local FLAP_FRAMES_PER_HOUR = 600
+local FLAP_FRAME_MODE = "fast"
+
+local function flapCacheFree(flap)
+    local cache = flap.cache
+    flap.cache = nil
+    if cache then
+        for _, buffer in pairs(cache.items) do pcall(buffer.free, buffer) end
+    end
+end
+
+local function flapGlyphBuffer(flap, g, w, h, dark, size)
+    local cache = flap.cache
+    if not cache or cache.w ~= w or cache.h ~= h or cache.size ~= size then
+        flapCacheFree(flap)
+        cache = { w = w, h = h, size = size, items = {}, count = 0 }
+        flap.cache = cache
+    end
+    local key = g .. (dark and "d" or "l")
+    local buffer = cache.items[key]
+    if buffer then return buffer end
+    if cache.count >= FLAP_GLYPH_LIMIT then return nil end
+    buffer = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+    buffer:fill(dark and BLACK or WHITE)
+    local widget = TextWidget:new { text = g, face = Font:getFace("cfont", size), bold = true,
+        fgcolor = dark and WHITE or BLACK, max_width = w * 3 }
+    local box = widget:getSize()
+    widget:paintTo(buffer, math.floor((w - box.w) / 2), math.floor((h - box.h) / 2))
+    widget:free()
+    cache.items[key] = buffer
+    cache.count = cache.count + 1
+    return buffer
+end
+
+-- Fallback when bitmaps are unavailable: one text widget per glyph, no half-glyph clipping.
+local function flapGlyphText(bb, g, x, y, w, h, size, dark)
+    local widget = TextWidget:new { text = g, face = Font:getFace("cfont", size), bold = true,
+        fgcolor = dark and WHITE or BLACK, max_width = w * 3 }
+    local box = widget:getSize()
+    widget:paintTo(bb, x + math.floor((w - box.w) / 2), y + math.floor((h - box.h) / 2))
     widget:free()
 end
 
@@ -196,6 +246,7 @@ function Dashboard:onSwitchView(_, ges)
     if app.mode == "aircraft" and app.aircraft and app.aircraft[app.selected_index or 1] then
         app.rotation_state.last_id = Rotation.identity(app.aircraft[app.selected_index or 1], app.selected_index or 1)
     end
+    app:flapCancel()
     app:scheduleRotation()
     UIManager:setDirty(self, "full")
     return true
@@ -257,68 +308,75 @@ function Dashboard:paintContent(bb, x, y)
     text(bb, hint, 24, H - 33, 16)
 end
 
-local function trainBadge(bb, x, y, line)
-    bb:paintRect(x, y, 76, 46, BLACK)
-    bb:paintRect(x + 3, y + 3, 70, 40, WHITE)
-    text(bb, Visuals.lineBadge(line), x + 9, y + 8, 24, 62, true)
-end
+local FLAP_GEOMETRY = {
+    wide = { x0 = 24, y0 = 162, pitch = 25, cw = 23, ch = 36, row_pitch = 50, font = 24, label_y = 140 },
+    tall = { x0 = 24, y0 = 192, pitch = 20, cw = 18, ch = 34, row_pitch = 62, font = 21, label_y = 170 },
+}
 
 function Dashboard:paintTrains(bb)
     local app, provider, trains = self.owner, self.owner.train_provider, self.owner.trains
     local wide = W > H
-    local right_x, bar_w = W - 24 - 176, 176
+    local geom = wide and FLAP_GEOMETRY.wide or FLAP_GEOMETRY.tall
+    local subtitle, empty
     if provider == "septa" then
-        text(bb, "SEPTA REGIONAL RAIL", 24, 126, 24, W - 48, true)
-        text(bb, string.format("%d trains within %d nm  /  positions approximate", #(trains or {}),
-            app.settings.radius_nm), 24, 165, 18, W - 48)
-        if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
-        if not trains then
-            text(bb, "Waiting for nearby trains", 24, 245, 24, W - 48)
-        elseif #trains == 0 then
-            text(bb, "No Regional Rail trains in range", 24, 245, 24, W - 48)
-        else
-            local count = math.min(#trains, wide and 4 or 6)
-            for i = 1, count do
-                local train, y = trains[i], 215 + (i - 1) * (wide and 75 or 85)
-                trainBadge(bb, 24, y, train.line)
-                text(bb, "To " .. train.destination, 116, y - 2, 23, right_x - 130, true)
-                text(bb, string.format("#%s  /  %.1f nm away", train.number, train.distance_nm),
-                    116, y + 28, 17, right_x - 130)
-                text(bb, train.line .. (train.next_stop ~= "" and ("  /  next: " .. train.next_stop) or ""),
-                    116, y + 50, 15, W - 140)
-                local delay = train.delay
-                text(bb, delay and (delay > 0 and (delay .. " min late") or "on time") or "delay unknown",
-                    right_x, y - 2, 21, bar_w, delay ~= nil and delay > 0)
-                -- Delay bar: full width is 15 minutes or more late.
-                bb:paintRect(right_x, y + 30, bar_w, 12, BLACK)
-                bb:paintRect(right_x + 2, y + 32, bar_w - 4, 8, WHITE)
-                if delay and delay > 0 then
-                    bb:paintRect(right_x + 2, y + 32, math.floor((bar_w - 4) * math.min(delay, 15) / 15), 8, BLACK)
-                end
-            end
-        end
+        text(bb, "SEPTA REGIONAL RAIL", 24, 106, 22, W - 48, true)
+        subtitle = string.format("%d trains within %d nm  /  positions approximate", #(trains or {}), app.settings.radius_nm)
+        empty = "No Regional Rail trains in range"
     else
         local stop = app.train_stop
-        text(bb, "LONDON RAIL ARRIVALS", 24, 126, 24, W - 48, true)
-        text(bb, stop and (stop.name .. string.format("  /  %.1f km away", stop.distance_km))
-            or "Finding the nearest station", 24, 165, 19, W - 48)
-        if app.train_error then text(bb, "STALE  /  " .. app.train_error, 24, 195, 17, W - 48) end
-        if not trains then
-            text(bb, "Waiting for arrival predictions", 24, 245, 24, W - 48)
-        elseif #trains == 0 then
-            text(bb, "No predicted arrivals at this station", 24, 245, 22, W - 48)
-        else
-            local count = math.min(#trains, wide and 5 or 7)
-            for i = 1, count do
-                local train, y = trains[i], 215 + (i - 1) * (wide and 61 or 70)
-                trainBadge(bb, 24, y, train.line)
-                text(bb, "To " .. train.destination, 116, y - 2, 22, right_x - 130, true)
-                text(bb, train.line .. (train.platform ~= "" and ("  /  " .. train.platform) or ""),
-                    116, y + 26, 17, right_x - 130)
-                text(bb, string.format("%d min", train.minutes), right_x, y + 2, 28, bar_w, true)
+        text(bb, "LONDON RAIL ARRIVALS", 24, 106, 22, W - 48, true)
+        subtitle = stop and (stop.name .. string.format("  /  %.1f km away", stop.distance_km)) or "Finding the nearest station"
+        empty = "No predicted arrivals at this station"
+    end
+    if app.train_error then subtitle = "STALE  /  " .. app.train_error end
+    if wide then text(bb, subtitle, 330, 112, 16, W - 354) else text(bb, subtitle, 24, 138, 15, W - 48) end
+    if not trains then
+        text(bb, provider == "septa" and "Waiting for nearby trains" or "Waiting for arrival predictions", 24, 200, 24, W - 48)
+        return
+    elseif #trains == 0 then
+        text(bb, empty, 24, 200, 24, W - 48)
+        return
+    end
+    local board = app:flapBoard()
+    if not board then return end
+    local flap = app.flap
+    local spec = board.spec
+    for fi, field in ipairs(spec.fields) do
+        text(bb, field.label, Splitflap.cellX(spec, geom, spec.first[fi]), geom.label_y, 13, 140)
+    end
+    self.board_geom = geom
+    local ctx = {
+        black = BLACK, white = WHITE,
+        rect = function(x, y, w, h, color) bb:paintRect(x, y, w, h, color) end,
+        glyph = function(g, x, y, w, h, dark, part)
+            if g == " " then return end
+            if flap.use_cache then
+                local buffer = flapGlyphBuffer(flap, g, w, h, dark, geom.font)
+                if buffer then
+                    local inset, half = dark and 0 or 2, math.floor(h / 2)
+                    local sy, sh = inset, h - 2 * inset
+                    if part == "top" then sy, sh = inset, half - inset
+                    elseif part == "bottom" then sy, sh = half, h - half - inset end
+                    bb:blitFrom(buffer, x + inset, y + sy, inset, sy, w - 2 * inset, sh)
+                    return
+                end
             end
-        end
-        text(bb, "Station predictions, not train positions", 24, H - 100, 17, W - 48)
+            if part ~= "bottom" then flapGlyphText(bb, g, x, y, w, h, geom.font, dark) end
+        end,
+    }
+    local ok, err = xpcall(function() Splitflap.paint(ctx, board, geom, flap.anim, flap.k) end, debug.traceback)
+    if not ok then
+        -- Drop the animation and the bitmap cache for good, then draw the plain board.
+        diag("board paint error", err)
+        app:flapCancel()
+        flapCacheFree(flap)
+        flap.use_cache = false
+        Splitflap.paint(ctx, board, geom, nil, 0)
+    end
+    if provider == "septa" then
+        text(bb, "Nearby trains, not a timetable. Outlined tiles are late or unknown.", 24, H - 96, 15, W - 48)
+    else
+        text(bb, "Station predictions, not train positions", 24, H - 96, 15, W - 48)
     end
 end
 
@@ -648,6 +706,11 @@ function Sky:init()
     if self.settings.landscape == nil then self.settings.landscape = true end
     if self.settings.auto_rotate == nil then self.settings.auto_rotate = true end
     if not Time.isValidZone(self.settings.timezone) then self.settings.timezone = "auto" end
+    local mode = self.settings.flap_mode
+    if mode ~= "off" and mode ~= "subtle" and mode ~= "full" then self.settings.flap_mode = "subtle" end
+    local ms = tonumber(self.settings.flap_ms)
+    self.settings.flap_ms = (ms and ms >= 250 and ms <= 1000) and math.floor(ms) or 350
+    self.flap = { use_cache = true, k = 0, hour_start = 0, hour_frames = 0, sequences = 0 }
     self.mode = "home"
     self.selected_index = 1
     self.rotation_state = {}
@@ -656,7 +719,99 @@ function Sky:init()
     self.refresh_task = guarded("refresh", function() self:refresh() end)
     self.rotate_task = guarded("rotate", function() self:rotateView() end,
         function() self:scheduleRotation() end)
+    self.flap.task = guarded("flip", function() self:flapStep() end, function() self:flapFail() end)
     self.ui.menu:registerToMainMenu(self)
+end
+
+-- ---------- Flip board state ----------
+function Sky:flapCancel()
+    local flap = self.flap
+    UIManager:unschedule(flap.task)
+    flap.anim, flap.k = nil, 0
+end
+
+function Sky:flapFail()
+    -- Any error in the animation turns it off for the rest of the session. The static board stays.
+    local flap = self.flap
+    flap.disabled = true
+    self:flapCancel()
+    flapCacheFree(flap)
+    if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
+end
+
+-- Rebuild the board when the train data changed. When animate is true and the screen is showing,
+-- cells that changed flip; otherwise the new board simply appears.
+function Sky:flapSync(animate)
+    local flap = self.flap
+    local trains, provider = self.trains, self.train_provider
+    if not provider or not trains then
+        self:flapCancel()
+        flap.board, flap.keys, flap.source, flap.layout = nil, nil, nil, nil
+        return
+    end
+    local wide = W > H
+    local layout = provider .. (wide and "w" or "p")
+    if flap.board and flap.source == trains and flap.layout == layout then return end
+    local same = flap.layout == layout
+    local old = same and flap.board or nil
+    local board, keys = Splitflap.boardFor(provider, wide, trains, same and flap.keys or nil, Visuals.lineBadge)
+    self:flapCancel()
+    flap.board, flap.keys, flap.source, flap.layout = board, keys, trains, layout
+    if animate and old and self.running and self.dashboard and self.mode == "trains"
+        and self.settings.flap_mode ~= "off" and not flap.disabled then
+        self:flapStart(old, board)
+    end
+end
+
+function Sky:flapBoard()
+    if not self.flap.board or self.flap.source ~= self.trains then self:flapSync(false) end
+    return self.flap.board
+end
+
+function Sky:flapStart(old, board)
+    local flap = self.flap
+    local changes = Splitflap.diff(old, board)
+    if not changes or #changes == 0 then return end
+    local opts = self.settings.flap_mode == "full" and { max_steps = 4, max_rows = 5, max_frames = 14 }
+        or { max_steps = 2, max_rows = 3, max_frames = 10 }
+    local anim = Splitflap.plan(changes, opts)
+    local now = os.time()
+    if now - flap.hour_start >= 3600 then flap.hour_start, flap.hour_frames = now, 0 end
+    if flap.hour_frames + anim.frames + 1 > FLAP_FRAMES_PER_HOUR then return end
+    local info = memory_info()
+    if info.available_kb and info.available_kb < LOW_MEMORY_KB then return end
+    flap.hour_frames = flap.hour_frames + anim.frames + 1
+    flap.anim, flap.k = anim, 0
+    UIManager:scheduleIn(self.settings.flap_ms / 1000, flap.task)
+end
+
+function Sky:flapRegion(anim)
+    local geom = self.dashboard and self.dashboard.board_geom
+    local lo, hi = Splitflap.dirtyRows(anim)
+    if not geom or not lo then return nil end
+    return Geom:new { x = 0, y = geom.y0 + (lo - 1) * geom.row_pitch - 4, w = W,
+        h = (hi - lo) * geom.row_pitch + geom.ch + 8 }
+end
+
+function Sky:flapStep()
+    local flap = self.flap
+    local anim = flap.anim
+    if not anim then return end
+    if not self.running or not self.dashboard or self.mode ~= "trains" then
+        self:flapCancel()
+        return
+    end
+    flap.k = flap.k + 1
+    local region = self:flapRegion(anim)
+    if flap.k >= anim.frames then
+        -- Everything has settled: one clean repaint, with an occasional full flash to clear ghosting.
+        flap.anim, flap.k = nil, 0
+        flap.sequences = flap.sequences + 1
+        UIManager:setDirty(self.dashboard, flap.sequences % 8 == 0 and "full" or "ui", flap.sequences % 8 ~= 0 and region or nil)
+        return
+    end
+    UIManager:setDirty(self.dashboard, FLAP_FRAME_MODE, region)
+    UIManager:scheduleIn(self.settings.flap_ms / 1000, flap.task)
 end
 
 function Sky:saveSettings()
@@ -727,6 +882,7 @@ function Sky:rotateView()
         self.mode = "home"
     end
     if self.mode ~= previous_mode then
+        self:flapCancel()
         self.rotation_count = (self.rotation_count or 0) + 1
         if self.dashboard then
             UIManager:setDirty(self.dashboard, self.rotation_count % 6 == 0 and "full" or "ui")
@@ -768,6 +924,9 @@ function Sky:stop()
         .. "  " .. battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
+    self:flapCancel()
+    flapCacheFree(self.flap)
+    self.flap.board, self.flap.keys, self.flap.source, self.flap.layout = nil, nil, nil, nil
     self:setKeepAwake(false)
     UIManager:allowStandby()
     if self.dashboard then UIManager:close(self.dashboard) end
@@ -921,6 +1080,11 @@ function Sky:refreshData()
     if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
         self.trains = nil
     end
+    local synced, sync_error = pcall(function() self:flapSync(true) end)
+    if not synced then
+        diag("board update error", sync_error)
+        self:flapFail()
+    end
     self.refresh_count = (self.refresh_count or 0) + 1
     if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
 end
@@ -929,6 +1093,7 @@ function Sky:onSuspend()
     diag("suspend", battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
+    self:flapCancel()
 end
 
 function Sky:onResume()
@@ -966,7 +1131,8 @@ function Sky:configure()
                 end
                 self.settings = { lat = lat, lon = lon, radius_nm = math.floor(radius),
                     refresh_seconds = math.floor(interval), landscape = self.settings.landscape,
-                    auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone }
+                    auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone,
+                    flap_mode = self.settings.flap_mode, flap_ms = self.settings.flap_ms }
                 self.train_provider = Trains.provider(lat, lon)
                 self.train_stop, self.train_stop_checked_at = nil, nil
                 self.trains, self.train_updated_at = nil, nil
@@ -1026,6 +1192,14 @@ function Sky:addToMainMenu(menu_items)
                   self:scheduleRotation()
                   if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
               end },
+            { text = _("Train board flips"), sub_item_table = {
+                { text = _("Off"), radio = true, checked_func = function() return self.settings.flap_mode == "off" end,
+                  callback = function() self.settings.flap_mode = "off"; self:flapCancel(); self:saveSettings() end },
+                { text = _("Subtle (2 flips, 3 rows)"), radio = true, checked_func = function() return self.settings.flap_mode == "subtle" end,
+                  callback = function() self.settings.flap_mode = "subtle"; self.flap.disabled = false; self:saveSettings() end },
+                { text = _("Full (4 flips, 5 rows)"), radio = true, checked_func = function() return self.settings.flap_mode == "full" end,
+                  callback = function() self.settings.flap_mode = "full"; self.flap.disabled = false; self:saveSettings() end },
+            } },
             { text = _("Time zone"), sub_item_table = timezone_items },
         },
     }

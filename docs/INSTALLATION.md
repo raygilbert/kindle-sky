@@ -15,7 +15,7 @@ Kindle Horizon is a KOReader plugin. This repository does not bundle KOReader, a
 4. Open **Tools → Kindle Horizon → Set location and refresh**. Enter your latitude and longitude in decimal degrees. The repository default, New York City, is an example. The initial radius is 40 nautical miles and the data refresh interval is 120 seconds; the shortest allowed interval is 60 seconds.
 5. Select **Time zone** and the display orientation, then choose **Start display**.
 
-If the menu entry does not appear, check that `main.lua`, `_meta.lua`, `data.lua`, `rotation.lua`, `time.lua`, `trains.lua`, `satellites.lua`, and `visuals.lua` are all inside the same `kindlesky.koplugin` directory, then restart KOReader.
+If the menu entry does not appear, check that `main.lua`, `_meta.lua`, `data.lua`, `rotation.lua`, `time.lua`, `trains.lua`, `satellites.lua`, `splitflap.lua`, and `visuals.lua` are all inside the same `kindlesky.koplugin` directory, then restart KOReader.
 
 ## Use the display
 
@@ -23,7 +23,7 @@ The display opens on a combined Home view. It cycles through Home, Aircraft, and
 
 Tap a radar dot for that aircraft's details. On the Aircraft view, tap the left side to move to the next aircraft, the right side for Satellites, or the header to return Home. On Home, tap the satellite area for the sky map. In supported regions, tap the Satellite view to open Trains, then tap again to return Home. **Tools → Kindle Horizon → Show nearby trains** opens that view directly. Hold anywhere to exit. Manual taps restart the automatic view timer.
 
-The saved latitude and longitude select the rail provider: SEPTA Regional Rail in the Philadelphia region, TfL rail arrivals in Greater London, and no train panel elsewhere. Changing coordinates does not detect your physical location automatically; set them again when you move. SEPTA shows approximate positions within the configured radius. London shows predictions at the nearest station within 1.5 km. See [data sources and limitations](DATA_AND_LIMITS.md).
+The Trains view is a tile board. Each train keeps its row while it stays in range, so a re-sort does not move it, and only cells whose text changed flip. **Tools → Kindle Horizon → Train board flips** chooses Off, Subtle (up to 2 flips per cell, 3 rows), or Full (up to 4 flips per cell, 5 rows). Each flip is a partial screen refresh, so Off is the choice if you see ghosting or want the least battery use; if the flip code ever fails, it switches itself off for the session and the board stays static. The saved latitude and longitude select the rail provider: SEPTA Regional Rail in the Philadelphia region, TfL rail arrivals in Greater London, and no train panel elsewhere. Changing coordinates does not detect your physical location automatically; set them again when you move. SEPTA shows approximate positions within the configured radius. London shows predictions at the nearest station within 1.5 km. See [data sources and limitations](DATA_AND_LIMITS.md).
 
 The sky map shows catalog satellites at least 10° above the saved location's horizon. It downloads CelesTrak orbital elements at most once every two hours, caches them across restarts, and estimates positions locally between downloads. The ISS appears when overhead. If CelesTrak reports an HTTP error, the plugin pauses catalog requests until you choose **Retry satellite catalog**. A newly detected aircraft emergency takes the Aircraft view for one cycle.
 
