@@ -7,6 +7,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local InfoMessage = require("ui/widget/infomessage")
 local LuaSettings = require("luasettings")
 local MultiInputDialog = require("ui/widget/multiinputdialog")
+local ConfirmBox = require("ui/widget/confirmbox")
 local NetworkMgr = require("ui/network/manager")
 local PluginShare = require("pluginshare")
 local Screen = Device.screen
@@ -27,6 +28,8 @@ local Time = dofile(plugin_dir .. "time.lua")
 local Rotation = dofile(plugin_dir .. "rotation.lua")
 local Trains = dofile(plugin_dir .. "trains.lua")
 local Satellites = dofile(plugin_dir .. "satellites.lua")
+local Logbook = dofile(plugin_dir .. "logbook.lua")
+local Lookup = dofile(plugin_dir .. "lookup.lua")
 local W, H = Screen:getWidth(), Screen:getHeight()
 local BLACK, WHITE, GRAY = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_DARK_GRAY
 
@@ -209,6 +212,10 @@ function Dashboard:init()
     }
 end
 
+local function inRect(r, px, py)
+    return r and px >= r.x and px <= r.x + r.w and py >= r.y and py <= r.y + r.h
+end
+
 function Dashboard:onSwitchView(_, ges)
     local app = self.owner
     local px, py = ges and ges.pos and ges.pos.x or 0, ges and ges.pos and ges.pos.y or 0
@@ -229,14 +236,30 @@ function Dashboard:onSwitchView(_, ges)
             app.mode = "aircraft"
         end
     elseif app.mode == "aircraft" then
-        if nearest then
+        if inRect(self.button_rect, px, py) then
+            app:captureSelected()
+        elseif nearest then
             app.selected_index = nearest
         elseif py < 108 then
             app.mode = "home"
+        elseif py >= H - 71 then
+            app.mode, app.logbook_page = "logbook", 1
         elseif px < W / 2 and app.aircraft and #app.aircraft > 0 then
             app.selected_index = (app.selected_index or 1) % #app.aircraft + 1
         else
             app.mode = "satellites"
+        end
+    elseif app.mode == "capture" then
+        app:capCancel()
+        app.mode = "aircraft"
+    elseif app.mode == "logbook" then
+        local pages = app.logbook_pages or 1
+        if py < 108 then
+            app.mode = "aircraft"
+        elseif px >= W / 2 then
+            app.logbook_page = (app.logbook_page or 1) % pages + 1
+        else
+            app.logbook_page = ((app.logbook_page or 1) - 2) % pages + 1
         end
     elseif app.mode == "satellites" and app.train_provider then
         app.mode = "trains"
@@ -248,6 +271,7 @@ function Dashboard:onSwitchView(_, ges)
     end
     app:flapCancel()
     app:scheduleRotation()
+    app:wantLookup()
     UIManager:setDirty(self, "full")
     return true
 end
@@ -271,14 +295,18 @@ function Dashboard:paintTo(bb, x, y)
     end)
 end
 
+local CAP_SPEC = Splitflap.spec({ { key = "t", cells = 12, label = "" } }, 3, 0)
+
+local MODE_NAMES = { home = "AT A GLANCE", aircraft = "AIRCRAFT", satellites = "SATELLITES", trains = "TRAINS",
+    capture = "CAPTURED", logbook = "LOGBOOK" }
+
 function Dashboard:paintContent(bb, x, y)
     local app = self.owner
     bb:paintRect(x, y, W, H, WHITE)
     text(bb, "KINDLE HORIZON", 24, 18, 34, W - 48, true)
     local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
     text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
-    local mode_name = app.mode == "home" and "AT A GLANCE" or
-        (app.mode == "aircraft" and "AIRCRAFT" or (app.mode == "satellites" and "SATELLITES" or "TRAINS"))
+    local mode_name = MODE_NAMES[app.mode] or "TRAINS"
     text(bb, "LOCAL  /  " .. mode_name, 24, 68, 20, 350)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
     local satellite_status = (app.satellite_error and "STALE " or "") .. age(app.catalog_updated_at)
@@ -293,19 +321,66 @@ function Dashboard:paintContent(bb, x, y)
         self:paintAircraft(bb)
     elseif app.mode == "trains" then
         self:paintTrains(bb)
+    elseif app.mode == "capture" then
+        self:paintCapture(bb)
+    elseif app.mode == "logbook" then
+        self:paintLogbook(bb)
     else
         self:paintSatellites(bb)
     end
     rule(bb, H - 71)
     local source = app.mode == "home" and "adsb.fi / CelesTrak"
-        or (app.mode == "aircraft" and "https://adsb.fi" or
+        or (app.mode == "aircraft" and "adsb.fi / adsbdb.com (routes are schedule data)" or
         (app.mode == "trains" and (app.train_provider == "septa" and "SEPTA Regional Rail API" or "Transport for London API")
-        or "CelesTrak GP / approximate sky positions"))
+        or ((app.mode == "capture" or app.mode == "logbook") and "Saved on this Kindle"
+        or "CelesTrak GP / approximate sky positions")))
     text(bb, source, 24, H - 58, 15)
     local hint = app.mode == "home" and "Tap radar: aircraft   Tap satellite: sky   Hold: exit"
-        or (app.mode == "aircraft" and "Tap left: next   Right: satellites   Header: home"
-        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))
+        or (app.mode == "aircraft" and "Left: next  Right: satellites  Top: home  Bottom: logbook"
+        or (app.mode == "capture" and "Tap: back   Hold: exit"
+        or (app.mode == "logbook" and "Right: next page  Left: previous  Top: back"
+        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))))
     text(bb, hint, 24, H - 33, 16)
+end
+
+-- Drawing context for Splitflap.paint and paintString: rectangles and glyphs on the screen buffer.
+function Dashboard:flapContext(bb, geom)
+    local flap = self.owner.flap
+    return {
+        black = BLACK, white = WHITE,
+        rect = function(x, y, w, h, color) bb:paintRect(x, y, w, h, color) end,
+        glyph = function(g, x, y, w, h, dark, part)
+            if g == " " then return end
+            if flap.use_cache then
+                local buffer = flapGlyphBuffer(flap, g, w, h, dark, geom.font)
+                if buffer then
+                    local inset, half = dark and 0 or 2, math.floor(h / 2)
+                    local sy, sh = inset, h - 2 * inset
+                    if part == "top" then sy, sh = inset, half - inset
+                    elseif part == "bottom" then sy, sh = half, h - half - inset end
+                    bb:blitFrom(buffer, x + inset, y + sy, inset, sy, w - 2 * inset, sh)
+                    return
+                end
+            end
+            if part ~= "bottom" then flapGlyphText(bb, g, x, y, w, h, geom.font, dark) end
+        end,
+    }
+end
+
+-- A short string of loose tiles (route codes, buttons). Falls back to plain text if tiles fail.
+local TILE = { pitch = 20, cw = 18, ch = 34, row_pitch = 40, font = 21 }
+
+function Dashboard:tiles(bb, x, y, s, dark)
+    s = Splitflap.clean(s)
+    local ok, err = pcall(Splitflap.paintString, self:flapContext(bb, TILE), TILE, x, y, s, dark)
+    if not ok then
+        if err ~= self.last_tile_error then
+            self.last_tile_error = err
+            diag("tile paint error", err)
+        end
+        self.owner.flap.use_cache = false
+        text(bb, s, x, y, TILE.font, #s * TILE.pitch + 20, true)
+    end
 end
 
 local FLAP_GEOMETRY = {
@@ -345,25 +420,7 @@ function Dashboard:paintTrains(bb)
         text(bb, field.label, Splitflap.cellX(spec, geom, spec.first[fi]), geom.label_y, 13, 140)
     end
     self.board_geom = geom
-    local ctx = {
-        black = BLACK, white = WHITE,
-        rect = function(x, y, w, h, color) bb:paintRect(x, y, w, h, color) end,
-        glyph = function(g, x, y, w, h, dark, part)
-            if g == " " then return end
-            if flap.use_cache then
-                local buffer = flapGlyphBuffer(flap, g, w, h, dark, geom.font)
-                if buffer then
-                    local inset, half = dark and 0 or 2, math.floor(h / 2)
-                    local sy, sh = inset, h - 2 * inset
-                    if part == "top" then sy, sh = inset, half - inset
-                    elseif part == "bottom" then sy, sh = half, h - half - inset end
-                    bb:blitFrom(buffer, x + inset, y + sy, inset, sy, w - 2 * inset, sh)
-                    return
-                end
-            end
-            if part ~= "bottom" then flapGlyphText(bb, g, x, y, w, h, geom.font, dark) end
-        end,
-    }
+    local ctx = self:flapContext(bb, geom)
     local ok, err = xpcall(function() Splitflap.paint(ctx, board, geom, flap.anim, flap.k) end, debug.traceback)
     if not ok then
         -- Drop the animation and the bitmap cache for good, then draw the plain board.
@@ -525,9 +582,82 @@ function Dashboard:paintHome(bb)
     end
 end
 
+local LAYOUT_WIDE = { x = 24, w = 350, tag = 177, call = 208, call_size = 38, airline = 252, desc = 280,
+    route = 316, cities = 358, model = 386, dist = 414, alt = 442, bx = 24, by = 482, note_x = 198, note_y = 492 }
+local LAYOUT_TALL = { x = 24, w = 552, tag = 160, call = 184, call_size = 40, airline = 236, desc = 262,
+    route = 290, cities = 328, model = 352, dist = 376, alt = nil, bx = 410, by = 604, note_x = 410, note_y = 648 }
+
+-- Route block: tiles for the airports, or a plain message when there is nothing to show.
+function Dashboard:paintRoute(bb, state, info, L)
+    local route = info and info.route
+    if state == "found" and route then
+        local from, to = route.from.code, route.to.code
+        self:tiles(bb, L.x, L.route, from, true)
+        self:tiles(bb, L.x + #from * TILE.pitch, L.route, "-", false)
+        self:tiles(bb, L.x + (#from + 1) * TILE.pitch, L.route, to, true)
+        text(bb, (route.from.city or from) .. " to " .. (route.to.city or to), L.x, L.cities, 16, L.w)
+    elseif state == "found" or state == "none" then
+        self:tiles(bb, L.x, L.route, "NO ROUTE", false)
+        text(bb, state == "found" and "Not in the schedule data" or "Aircraft not in the database", L.x, L.cities, 16, L.w)
+    elseif state == "error" then
+        text(bb, "Route lookup unavailable", L.x, L.route + 6, 19, L.w)
+    elseif state == "miss" then
+        text(bb, "Looking up route...", L.x, L.route + 6, 19, L.w)
+    end
+end
+
+-- The capture button is the confirmation: nothing is added to the logbook until it is tapped.
+function Dashboard:paintCaptureButton(bb, plane, info, L)
+    local app = self.owner
+    self.button_rect = nil
+    local entry = Logbook.entry(plane, info)
+    if not entry then return end
+    local st = Logbook.status(app.logbook, entry, app:today())
+    local word = st.today and "CAPTURED" or "CAPTURE"
+    self:tiles(bb, L.bx, L.by, word, st.today)
+    self.button_rect = { x = L.bx - 10, y = L.by - 10, w = #word * TILE.pitch + 20, h = TILE.ch + 20 }
+    local note
+    if st.today then
+        note = string.format("Type seen %d, plane %d", st.type_count, st.reg_count)
+    elseif st.new_type or st.new_reg then
+        note = (st.new_type and "New type" or "Seen type") .. ", " .. (st.new_reg and "new plane" or "seen plane")
+    else
+        note = string.format("Type seen %d, plane %d", st.type_count, st.reg_count)
+    end
+    local note_x = L.note_x
+    if W > H then note_x = L.bx + 8 * TILE.pitch + 14 end
+    text(bb, note, note_x, L.note_y, 16, W > H and 190 or (W - note_x - 20))
+end
+
+function Dashboard:paintPlaneDetail(bb, plane, index, count, L)
+    local app = self.owner
+    local state, info = app:lookupState(plane)
+    local tag = plane.emergency and "EMERGENCY" or (plane.military and "REPORTED MILITARY" or (plane.rare and "RARE AIRCRAFT" or "NEAREST"))
+    text(bb, tag .. "  /  " .. index .. " OF " .. count, L.x, L.tag, 18, L.w, true)
+    text(bb, plane.flight ~= "" and plane.flight or (plane.registration ~= "" and plane.registration or plane.id),
+        L.x, L.call, L.call_size, L.w, true)
+    if info and info.airline then text(bb, info.airline, L.x, L.airline, 20, L.w, true) end
+    local desc = plane.description ~= "" and plane.description or (info and info.type_name) or select(2, Visuals.aircraftKind(plane))
+    text(bb, desc, L.x, L.desc, 19, L.w)
+    self:paintRoute(bb, state, info, L)
+    text(bb, (plane.model ~= "" and plane.model or "Unknown type") .. "  " .. plane.registration, L.x, L.model, 17, L.w)
+    local altitude = plane.altitude_ft and (tostring(math.floor(plane.altitude_ft + 0.5)) .. " ft") or "-- ft"
+    local speed = plane.speed_kt and (tostring(math.floor(plane.speed_kt + 0.5)) .. " kt") or "-- kt"
+    local distance = string.format("%.1f nm  /  %03d deg", plane.distance_nm, plane.bearing)
+    if L.alt then
+        text(bb, distance, L.x, L.dist, 20, L.w)
+        text(bb, altitude .. "  /  " .. speed, L.x, L.alt, 20, L.w)
+    else
+        text(bb, distance .. "  /  " .. altitude .. "  /  " .. speed, L.x, L.dist, 18, L.w)
+    end
+    self:paintCaptureButton(bb, plane, state == "found" and info or nil, L)
+end
+
 function Dashboard:paintAircraft(bb)
     local app, ac = self.owner, self.owner.aircraft
+    self.button_rect = nil
     if W > H then return self:paintAircraftLandscape(bb) end
+    LAYOUT_TALL.w = W - 48
     if not ac then
         text(bb, "AIRCRAFT DATA UNAVAILABLE", 24, 135, 25, W - 48, true)
         text(bb, app.aircraft_error or "Check Wi-Fi", 24, 180, 19)
@@ -536,15 +666,7 @@ function Dashboard:paintAircraft(bb)
     text(bb, string.format("%d aircraft within %d nm", #ac, app.settings.radius_nm), 24, 126, 22)
     local first = ac[app.selected_index or 1] or ac[1]
     if first then
-        local tag = first.emergency and "EMERGENCY" or (first.military and "REPORTED MILITARY" or (first.rare and "RARE AIRCRAFT" or "NEAREST"))
-        text(bb, tag .. "  /  " .. (app.selected_index or 1) .. " OF " .. #ac, 24, 178, 18, W - 48, true)
-        text(bb, first.flight ~= "" and first.flight or (first.registration ~= "" and first.registration or first.id), 24, 211, 40, W - 48, true)
-        text(bb, first.description ~= "" and first.description or select(2, Visuals.aircraftKind(first)), 24, 266, 20, W - 48)
-        text(bb, (first.model ~= "" and first.model or "Unknown type") .. "  " .. first.registration, 24, 300, 19)
-        text(bb, string.format("%.1f nm  /  %03d deg", first.distance_nm, first.bearing), 24, 335, 22)
-        local altitude = first.altitude_ft and (tostring(math.floor(first.altitude_ft + 0.5)) .. " ft") or "-- ft"
-        local speed = first.speed_kt and (tostring(math.floor(first.speed_kt + 0.5)) .. " kt") or "-- kt"
-        text(bb, altitude .. "  /  " .. speed, 24, 374, 20)
+        self:paintPlaneDetail(bb, first, app.selected_index or 1, #ac, LAYOUT_TALL)
     else
         text(bb, "No aircraft in range", 24, 210, 30, W - 48, true)
     end
@@ -566,15 +688,7 @@ function Dashboard:paintAircraftLandscape(bb)
     text(bb, string.format("%d aircraft within %d nm", #ac, app.settings.radius_nm), 24, 126, 22, 360)
     local first = ac[app.selected_index or 1] or ac[1]
     if first then
-        local tag = first.emergency and "EMERGENCY" or (first.military and "REPORTED MILITARY" or (first.rare and "RARE AIRCRAFT" or "NEAREST"))
-        text(bb, tag .. "  /  " .. (app.selected_index or 1) .. " OF " .. #ac, 24, 177, 18, 350, true)
-        text(bb, first.flight ~= "" and first.flight or (first.registration ~= "" and first.registration or first.id), 24, 208, 38, 350, true)
-        text(bb, first.description ~= "" and first.description or select(2, Visuals.aircraftKind(first)), 24, 259, 20, 350)
-        text(bb, (first.model ~= "" and first.model or "Unknown type") .. "  " .. first.registration, 24, 292, 19, 350)
-        text(bb, string.format("%.1f nm  /  %03d deg", first.distance_nm, first.bearing), 24, 328, 22, 350)
-        local altitude = first.altitude_ft and (tostring(math.floor(first.altitude_ft + 0.5)) .. " ft") or "-- ft"
-        local speed = first.speed_kt and (tostring(math.floor(first.speed_kt + 0.5)) .. " kt") or "-- kt"
-        text(bb, altitude .. "  /  " .. speed, 24, 365, 20, 350)
+        self:paintPlaneDetail(bb, first, app.selected_index or 1, #ac, LAYOUT_WIDE)
     else
         text(bb, "No aircraft in range", 24, 210, 27, 350, true)
     end
@@ -585,6 +699,70 @@ function Dashboard:paintAircraftLandscape(bb)
     end
     text(bb, "NEARBY RADAR", 421, 306, 18, 350, true)
     self:paintRadar(bb, ac, 592, 425, 64, app.settings.radius_nm, app.selected_index or 1)
+end
+
+-- ---------- Capture and logbook screens ----------
+local CAP_GEOM = { x0 = 24, y0 = 150, pitch = 30, cw = 27, ch = 48, row_pitch = 60, font = 32 }
+
+function Dashboard:paintCapture(bb)
+    local app = self.owner
+    local cap = app.cap
+    if not cap then
+        text(bb, "Nothing captured", 24, 150, 26, W - 48, true)
+        return
+    end
+    local wide = W > H
+    local geom = { x0 = wide and 24 or math.floor((W - 12 * CAP_GEOM.pitch) / 2), y0 = CAP_GEOM.y0, pitch = CAP_GEOM.pitch,
+        cw = CAP_GEOM.cw, ch = CAP_GEOM.ch, row_pitch = CAP_GEOM.row_pitch, font = CAP_GEOM.font }
+    app.cap_geom = geom
+    local ctx = self:flapContext(bb, geom)
+    local ok, err = xpcall(function() Splitflap.paint(ctx, cap.board, geom, cap.anim, cap.k) end, debug.traceback)
+    if not ok then
+        diag("capture paint error", err)
+        app:capCancel()
+        app.flap.use_cache = false
+        pcall(Splitflap.paint, ctx, cap.board, geom, nil, 0)
+    end
+    local x = wide and 421 or 24
+    local y = wide and 150 or 150 + 3 * CAP_GEOM.row_pitch + 20
+    local w = wide and 350 or W - 48
+    local result, entry = cap.result, cap.entry
+    text(bb, entry.type_name ~= "" and entry.type_name or "Unknown aircraft type", x, y, 24, w, true)
+    if entry.airline ~= "" then text(bb, entry.airline, x, y + 36, 20, w) end
+    text(bb, result.new_type and "NEW AIRCRAFT TYPE" or string.format("TYPE SEEN %d TIMES", result.type_count),
+        x, y + 76, 19, w, result.new_type)
+    text(bb, result.new_reg and "NEW REGISTRATION" or string.format("THIS PLANE SEEN %d TIMES", result.reg_count),
+        x, y + 108, 19, w, result.new_reg)
+    local totals = Logbook.totals(app.logbook)
+    text(bb, string.format("LOGBOOK  %d TYPES  /  %d PLANES", totals.types, totals.planes), x, y + 152, 17, w)
+    if cap.save_failed then text(bb, "Could not save the logbook", x, y + 184, 17, w, true) end
+end
+
+function Dashboard:paintLogbook(bb)
+    local app = self.owner
+    local wide = W > H
+    local per = wide and 6 or 8
+    local totals = Logbook.totals(app.logbook)
+    text(bb, string.format("%d %s  /  %d %s  /  %d %s", totals.types, totals.types == 1 and "type" or "types",
+        totals.planes, totals.planes == 1 and "plane" or "planes", totals.airlines, totals.airlines == 1 and "airline" or "airlines"),
+        24, 116, 20, W - 48, true)
+    local items, page, pages = Logbook.list(app.logbook, app.logbook_page or 1, per)
+    app.logbook_page, app.logbook_pages = page, pages
+    if #items == 0 then
+        text(bb, "Nothing captured yet", 24, 190, 26, W - 48, true)
+        text(bb, "Open an aircraft and tap CAPTURE to add it.", 24, 236, 19, W - 48)
+        return
+    end
+    local pitch = wide and 52 or 64
+    for i, item in ipairs(items) do
+        local y = 156 + (i - 1) * pitch
+        text(bb, item.type, 24, y, 24, 120, true)
+        text(bb, item.name ~= "" and item.name or "Unknown type", 150, y, 20, W - 150 - 110)
+        text(bb, "x" .. item.count, W - 100, y, 22, 80, true)
+        local when = Time.format(item.last, "%b %d", app.settings.timezone)
+        text(bb, "Last seen " .. when, 150, y + 26, 14, W - 150 - 110)
+    end
+    text(bb, string.format("PAGE %d OF %d", page, pages), 24, H - 96, 15, W - 48)
 end
 
 function Dashboard:paintSatelliteSky(bb, satellites, cx, cy, radius)
@@ -711,6 +889,12 @@ function Sky:init()
     local ms = tonumber(self.settings.flap_ms)
     self.settings.flap_ms = (ms and ms >= 250 and ms <= 1000) and math.floor(ms) or 350
     self.flap = { use_cache = true, k = 0, hour_start = 0, hour_frames = 0, sequences = 0 }
+    self.logbook_file = LuaSettings:open(DataStorage:getSettingsDir() .. "/kindlesky_logbook.lua")
+    self.logbook = Logbook.sanitize(self.logbook_file:readSetting("logbook"), os.time())
+    self.logbook_page = 1
+    self.lookup = { cache = Lookup.cache(60), pending = false, last_at = 0, hour_start = 0, hour_n = 0 }
+    self.lookup.task = guarded("lookup", function() self:runLookup() end, function() self.lookup.pending = false end)
+    self.cap_task = guarded("capture", function() self:capStep() end, function() self:capCancel() end)
     self.mode = "home"
     self.selected_index = 1
     self.rotation_state = {}
@@ -814,6 +998,169 @@ function Sky:flapStep()
     UIManager:scheduleIn(self.settings.flap_ms / 1000, flap.task)
 end
 
+-- ---------- Route lookup, capture and logbook ----------
+local LOOKUP_PER_HOUR = 90
+local LOOKUP_MIN_GAP = 3
+local LOOKUP_STALE = 60
+
+function Sky:today()
+    return (Time.format(os.time(), "%Y%m%d", self.settings.timezone))
+end
+
+function Sky:selectedAircraft()
+    if self.mode ~= "aircraft" or not self.aircraft then return nil end
+    return self.aircraft[self.selected_index or 1] or self.aircraft[1]
+end
+
+-- "found", "none", "error", "miss" (not asked yet) or "skip" (nothing to ask about).
+function Sky:lookupState(plane)
+    if self.settings.lookup == false then return "skip" end
+    local key = Lookup.key(plane)
+    if not key then return "skip" end
+    return Lookup.get(self.lookup.cache, key, os.time())
+end
+
+-- Ask for the selected aircraft's route when it has not been asked about. One request at a time.
+function Sky:wantLookup()
+    local lk = self.lookup
+    if not self.running or self.mode ~= "aircraft" then return end
+    if lk.pending and os.time() - lk.pending < LOOKUP_STALE then return end
+    local plane = self:selectedAircraft()
+    if not plane or self:lookupState(plane) ~= "miss" then return end
+    lk.pending = os.time()
+    UIManager:unschedule(lk.task)
+    UIManager:scheduleIn(1, lk.task)
+end
+
+function Sky:runLookup()
+    local lk = self.lookup
+    lk.pending = false
+    local plane = self:selectedAircraft()
+    if not self.running or not plane then return end
+    local key = Lookup.key(plane)
+    if not key or self:lookupState(plane) ~= "miss" then return end
+    local now = os.time()
+    if now - lk.hour_start >= 3600 then lk.hour_start, lk.hour_n = now, 0 end
+    if lk.hour_n >= LOOKUP_PER_HOUR then
+        Lookup.put(lk.cache, key, false, now, true)
+        if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
+        return
+    end
+    if now - lk.last_at < LOOKUP_MIN_GAP then
+        lk.pending = now
+        UIManager:scheduleIn(LOOKUP_MIN_GAP, lk.task)
+        return
+    end
+    lk.pending = now
+    NetworkMgr:runWhenConnected(function()
+        guarded("lookup request", function() self:lookupRequest(plane, key) end, function() lk.pending = false end)()
+        lk.pending = false
+        collectgarbage("collect")
+        NetworkMgr:afterWifiAction()
+        if self.running and self.dashboard and self.mode == "aircraft" then UIManager:setDirty(self.dashboard, "ui") end
+        self:wantLookup()
+    end)
+end
+
+function Sky:lookupRequest(plane, key)
+    local lk = self.lookup
+    local callsign = Lookup.cleanCallsign(plane.flight)
+    lk.last_at = os.time()
+    lk.hour_n = lk.hour_n + 1
+    local response, err = get_json(Lookup.aircraftUrl(plane.id, callsign))
+    local info, failed
+    if response then
+        info = Lookup.parse(response)
+    elseif err == "HTTP 404" then
+        -- Unknown airframe: the callsign alone may still have a scheduled route.
+        if callsign then
+            lk.hour_n = lk.hour_n + 1
+            local second, second_err = get_json(Lookup.callsignUrl(callsign))
+            if second then info = Lookup.parse(second) elseif second_err ~= "HTTP 404" then failed = true end
+        end
+    else
+        failed = true
+    end
+    Lookup.put(lk.cache, key, info or false, os.time(), failed and not info)
+end
+
+function Sky:saveLogbook()
+    local ok, err = pcall(function()
+        self.logbook_file:saveSetting("logbook", self.logbook)
+        self.logbook_file:flush()
+    end)
+    if not ok then diag("logbook save error", err) end
+    return ok
+end
+
+function Sky:resetLogbook()
+    self:capCancel()
+    self.cap = nil
+    self.logbook = Logbook.new(os.time())
+    self.logbook_page = 1
+    local saved = self:saveLogbook()
+    if self.mode == "capture" or self.mode == "logbook" then self.mode = "aircraft" end
+    if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+    UIManager:show(InfoMessage:new { text = saved and _("Logbook erased.") or _("Logbook erased, but the file could not be saved."), timeout = 3 })
+end
+
+-- Called when the owner taps CAPTURE: this is the confirmation, so only here does the book change.
+function Sky:captureSelected()
+    local plane = self:selectedAircraft()
+    if not plane then return end
+    local state, info = self:lookupState(plane)
+    if state ~= "found" then info = nil end
+    local entry = Logbook.entry(plane, info)
+    if not entry then return end
+    local result = Logbook.capture(self.logbook, entry, os.time(), self:today())
+    if not result then return end
+    local saved = self:saveLogbook()
+    local board = Splitflap.build(CAP_SPEC, { { text = { t = "CAPTURED" } }, { text = { t = entry.type or "TYPE ?" } },
+        { text = { t = entry.reg } } })
+    self.cap = { result = result, entry = entry, board = board, k = 0, save_failed = not saved }
+    self.mode = "capture"
+    self:capStart(board)
+end
+
+function Sky:capCancel()
+    UIManager:unschedule(self.cap_task)
+    if self.cap then self.cap.anim, self.cap.k = nil, 0 end
+end
+
+function Sky:capStart(board)
+    local cap = self.cap
+    if self.settings.flap_mode == "off" or self.flap.disabled then return end
+    local info = memory_info()
+    if info.available_kb and info.available_kb < LOW_MEMORY_KB then return end
+    local blank = Splitflap.build(CAP_SPEC, { { text = { t = "" } }, { text = { t = "" } }, { text = { t = "" } } })
+    local changes = Splitflap.diff(blank, board)
+    if not changes or #changes == 0 then return end
+    cap.anim = Splitflap.plan(changes, { max_steps = 3, max_rows = 3, max_frames = 14, col_div = 2 })
+    cap.k = 0
+    UIManager:scheduleIn(self.settings.flap_ms / 1000, self.cap_task)
+end
+
+function Sky:capStep()
+    local cap = self.cap
+    if not cap or not cap.anim then return end
+    if not self.running or not self.dashboard or self.mode ~= "capture" then
+        self:capCancel()
+        return
+    end
+    cap.k = cap.k + 1
+    local geom = self.cap_geom
+    local lo, hi = Splitflap.dirtyRows(cap.anim)
+    local region = geom and lo and Geom:new { x = 0, y = geom.y0 + (lo - 1) * geom.row_pitch - 4, w = W,
+        h = (hi - lo) * geom.row_pitch + geom.ch + 8 } or nil
+    if cap.k >= cap.anim.frames then
+        cap.anim, cap.k = nil, 0
+        UIManager:setDirty(self.dashboard, "ui", region)
+        return
+    end
+    UIManager:setDirty(self.dashboard, FLAP_FRAME_MODE, region)
+    UIManager:scheduleIn(self.settings.flap_ms / 1000, self.cap_task)
+end
+
 function Sky:saveSettings()
     self.settings_file:saveSetting("settings", self.settings)
     self.settings_file:flush()
@@ -867,6 +1214,9 @@ function Sky:rotateView()
     local now = os.time()
     if self.emergency_hold_until and now < self.emergency_hold_until then
         self.mode = "aircraft"
+    elseif self.mode == "capture" or self.mode == "logbook" then
+        self:capCancel()
+        self.mode = "aircraft"
     elseif self.mode == "home" then
         if self.aircraft and #self.aircraft > 0 then
             self.selected_index, self.rotation_state = Rotation.choose(self.aircraft, self.rotation_state)
@@ -883,6 +1233,7 @@ function Sky:rotateView()
     end
     if self.mode ~= previous_mode then
         self:flapCancel()
+        self:wantLookup()
         self.rotation_count = (self.rotation_count or 0) + 1
         if self.dashboard then
             UIManager:setDirty(self.dashboard, self.rotation_count % 6 == 0 and "full" or "ui")
@@ -924,6 +1275,10 @@ function Sky:stop()
         .. "  " .. battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
+    UIManager:unschedule(self.lookup.task)
+    self.lookup.pending = false
+    self:capCancel()
+    self.cap = nil
     self:flapCancel()
     flapCacheFree(self.flap)
     self.flap.board, self.flap.keys, self.flap.source, self.flap.layout = nil, nil, nil, nil
@@ -1087,12 +1442,16 @@ function Sky:refreshData()
     end
     self.refresh_count = (self.refresh_count or 0) + 1
     if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
+    self:wantLookup()
 end
 
 function Sky:onSuspend()
     diag("suspend", battery_text())
     UIManager:unschedule(self.refresh_task)
     UIManager:unschedule(self.rotate_task)
+    UIManager:unschedule(self.lookup.task)
+    self.lookup.pending = false
+    self:capCancel()
     self:flapCancel()
 end
 
@@ -1132,7 +1491,8 @@ function Sky:configure()
                 self.settings = { lat = lat, lon = lon, radius_nm = math.floor(radius),
                     refresh_seconds = math.floor(interval), landscape = self.settings.landscape,
                     auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone,
-                    flap_mode = self.settings.flap_mode, flap_ms = self.settings.flap_ms }
+                    flap_mode = self.settings.flap_mode, flap_ms = self.settings.flap_ms,
+                    lookup = self.settings.lookup }
                 self.train_provider = Trains.provider(lat, lon)
                 self.train_stop, self.train_stop_checked_at = nil, nil
                 self.trains, self.train_updated_at = nil, nil
@@ -1191,6 +1551,26 @@ function Sky:addToMainMenu(menu_items)
                   self.mode = "trains"
                   self:scheduleRotation()
                   if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+              end },
+            { text = _("Logbook"), callback = function()
+                  if not self.running then self:start() end
+                  self.mode, self.logbook_page = "logbook", 1
+                  self:scheduleRotation()
+                  if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+              end },
+            { text = _("Look up routes (adsbdb.com)"), checked_func = function() return self.settings.lookup ~= false end,
+              callback = function()
+                  self.settings.lookup = self.settings.lookup == false
+                  self:saveSettings()
+                  if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
+                  self:wantLookup()
+              end },
+            { text = _("Reset logbook"), callback = function()
+                  UIManager:show(ConfirmBox:new {
+                      text = _("Erase every captured aircraft type and registration? This cannot be undone."),
+                      ok_text = _("Erase"),
+                      ok_callback = function() self:resetLogbook() end,
+                  })
               end },
             { text = _("Train board flips"), sub_item_table = {
                 { text = _("Off"), radio = true, checked_func = function() return self.settings.flap_mode == "off" end,

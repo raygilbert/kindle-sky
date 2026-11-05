@@ -2,11 +2,14 @@
 import os, sys
 from lupa.luajit21 import LuaRuntime
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-lua = LuaRuntime(unpack_returned_tuples=True)
-src = open(os.path.join(root, "tests", "splitflap_test.lua")).read()
-run = lua.eval("function(src, root) return load(src, '@splitflap_test.lua')(root) end")
-try:
-    run(src, root)
-except Exception as e:
-    print(e)
-    sys.exit(1)
+failed = False
+for name in ("splitflap_test.lua", "logbook_test.lua"):
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    src = open(os.path.join(root, "tests", name)).read()
+    run = lua.eval("function(src, root, name) return load(src, '@' .. name)(root) end")
+    try:
+        run(src, root, name)
+    except Exception as e:
+        print(e)
+        failed = True
+sys.exit(1 if failed else 0)
