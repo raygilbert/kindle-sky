@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kindle Horizon</title>
-<meta name="description" content="Kindle Horizon is a KOReader plugin that shows nearby aircraft, satellites and trains on a jailbroken Kindle.">
+<meta name="description" content="Kindle Horizon is a KOReader plugin that shows nearby aircraft, satellites and trains on a jailbroken Kindle, with a logbook of what you capture.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;500;800&display=swap" rel="stylesheet">
@@ -152,7 +152,7 @@
   <section class="section band--ink" aria-labelledby="screens-h">
     <div class="container">
       <div class="head">
-        <h2 id="screens-h">Aircraft, satellites, trains.</h2>
+        <h2 id="screens-h">Aircraft, satellites, trains, logbook.</h2>
         <p class="lead">It cycles through them on its own, or you tap to pick one.</p>
       </div>
       <div data-switch>
@@ -160,16 +160,17 @@
           <button type="button" role="tab" id="t-air" aria-selected="true" aria-controls="p-air">Aircraft</button>
           <button type="button" role="tab" id="t-sat" aria-selected="false" aria-controls="p-sat" tabindex="-1">Satellites</button>
           <button type="button" role="tab" id="t-rail" aria-selected="false" aria-controls="p-rail" tabindex="-1">Trains</button>
+          <button type="button" role="tab" id="t-log" aria-selected="false" aria-controls="p-log" tabindex="-1">Logbook</button>
         </div>
                 <div class="pane" role="tabpanel" id="p-air" aria-labelledby="t-air">
           <figure class="screen">
-        <div class="frame" data-slot="aircraft" data-kind="product" data-alt="The aircraft screen: callsign, type, altitude and speed beside a heading dial and a radar">
-          <img src="img/aircraft.png" width="1600" height="1200" alt="The aircraft screen: helicopter G26042 at 10.6 nautical miles, 600 feet, with a heading dial reading 070 and a radar with the aircraft ringed" loading="lazy">
+        <div class="frame" data-slot="aircraft" data-kind="product" data-alt="The aircraft screen: callsign, airline, route, type, altitude and speed beside a heading dial and a radar, with a capture button">
+          <img src="img/aircraft.png" width="1600" height="1200" alt="The aircraft screen: Southwest flight SWA2737, a Boeing 737-800 flying Philadelphia to Orlando, 2 nautical miles away at 800 feet, with a heading dial, a radar, and a CAPTURE button in tiles" loading="lazy">
         </div>
       </figure>
           <div class="plate">
             <div><span class="figure">40 nm</span><span class="unit">default radar range</span></div>
-            <div><h3>Aircraft</h3><p>Callsign, type, registration, altitude and speed, with a heading dial beside the radar.</p></div>
+            <div><h3>Aircraft</h3><p>Callsign, airline, route, type, registration, altitude and speed, with a heading dial beside the radar. Tap CAPTURE to log it.</p></div>
           </div>
         </div>
         <div class="pane" role="tabpanel" id="p-sat" aria-labelledby="t-sat">
@@ -185,13 +186,24 @@
         </div>
         <div class="pane" role="tabpanel" id="p-rail" aria-labelledby="t-rail">
           <figure class="screen">
-        <div class="frame" data-slot="trains" data-kind="product" data-alt="The trains screen: three SEPTA Regional Rail trains with line badges and delay bars">
-          <img src="img/rail.png" width="1600" height="1200" alt="The trains screen: three SEPTA Regional Rail trains, each with a three-letter line badge, its destination, and a bar showing how many minutes late it is" loading="lazy">
+        <div class="frame" data-slot="trains" data-kind="product" data-alt="The trains screen: a board of flip tiles listing three SEPTA Regional Rail trains with line, destination and status">
+          <img src="img/rail.png" width="1600" height="1200" alt="The trains screen drawn as a board of black flip tiles: train 428 to Center City late 3 minutes, 530 to Warminster on time, 332 to Trenton late 11, with outlined tiles for the late ones" loading="lazy">
         </div>
       </figure>
           <div class="plate">
             <div><span class="figure">2</span><span class="unit">rail feeds, SEPTA and TfL</span></div>
-            <div><h3>Trains</h3><p>Each SEPTA train gets a line badge and a delay bar. London shows arrival minutes.</p></div>
+            <div><h3>Trains</h3><p>A board of flip tiles, in the spirit of the old departure board at 30th Street Station. Only cells that change flip, and late trains get outlined tiles. Double-tap to see a flip on demand.</p></div>
+          </div>
+        </div>
+        <div class="pane" role="tabpanel" id="p-log" aria-labelledby="t-log">
+          <figure class="screen">
+        <div class="frame" data-slot="capture" data-kind="product" data-alt="The capture screen: a CAPTURED card in flip tiles with the aircraft type and registration">
+          <img src="img/capture.png" width="1600" height="1200" alt="The capture screen: flip tiles spelling CAPTURED, the type B738 and the registration N50X, beside the words Boeing 737-800, Southwest Airlines, new aircraft type and new registration" loading="lazy">
+        </div>
+      </figure>
+          <div class="plate">
+            <div><span class="figure">2</span><span class="unit">counts per capture</span></div>
+            <div><h3>Logbook</h3><p>Tap CAPTURE to confirm a plane. The tiles flip into a card, and both its type and its registration are counted.</p></div>
           </div>
         </div>
       </div>
@@ -219,6 +231,27 @@
     </div>
   </section>
 
+  <section class="section" aria-labelledby="log-h">
+    <div class="container split">
+      <div>
+        <h2 id="log-h">A logbook on the Kindle.</h2>
+        <p class="lead">Spot a plane, tap to capture it, and watch the count grow. No photos, no account.</p>
+        <dl class="facts">
+          <div><dt>Confirmed</dt><dd>Nothing is counted until you tap CAPTURE.</dd></div>
+          <div><dt>Two counts</dt><dd>Aircraft type and registration are counted separately, once per plane per day.</dd></div>
+          <div><dt>Yours</dt><dd>Saved in a file on the Kindle and never uploaded. Reset logbook erases it.</dd></div>
+          <div><dt>Routes</dt><dd>Airline and route come from adsbdb.com. They are schedule data and can be wrong.</dd></div>
+        </dl>
+      </div>
+      <figure class="screen">
+        <div class="frame" data-slot="logbook" data-kind="product" data-alt="The logbook screen: a list of aircraft types with counts">
+          <img src="img/logbook.png" width="1600" height="1200" alt="The logbook screen: six aircraft types listed with how many times each was captured, from Boeing 737-800 seen 14 times to the Airbus Beluga seen twice" loading="lazy">
+        </div>
+        <figcaption>The logbook lists each type, how often you have captured it, and when you last did.</figcaption>
+      </figure>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="needs-h" data-tight>
     <div class="container">
       <div class="head head--solo">
@@ -231,7 +264,8 @@
           <tr><th scope="row">Network</th><td>Wi-Fi for live data. A power source is recommended.</td></tr>
           <tr><th scope="row">Location</th><td>Your own latitude and longitude, entered in the menu.</td></tr>
           <tr><th scope="row">Rail</th><td>SEPTA near Philadelphia, TfL near London. Elsewhere, no train screen.</td></tr>
-          <tr><th scope="row">Data</th><td>adsb.fi for aircraft, CelesTrak for satellites. Personal, non-commercial use.</td></tr>
+          <tr><th scope="row">Data</th><td>adsb.fi for aircraft, CelesTrak for satellites, adsbdb.com for airline and route. Personal, non-commercial use.</td></tr>
+          <tr><th scope="row">Logbook</th><td>Stored on the Kindle. Route lookup can be turned off in the menu.</td></tr>
         </tbody>
       </table>
     </div>
@@ -253,7 +287,7 @@
       </div>
       <figure class="screen">
         <div class="frame" data-slot="london" data-kind="product" data-alt="The trains screen for London: three Underground and Elizabeth line arrivals with minutes to go">
-          <img src="img/london.png" width="1600" height="1200" alt="The London trains screen: Central line to Ealing Broadway in 2 minutes, Northern line to Morden in 5, Elizabeth line to Reading in 9" loading="lazy">
+          <img src="img/london.png" width="1600" height="1200" alt="The London trains screen as flip tiles: Central line to Ealing Broadway in 2 minutes, Northern line to Morden in 5, Elizabeth line to Reading in 9" loading="lazy">
         </div>
         <figcaption>In London it shows arrival minutes at the nearest station.</figcaption>
       </figure>
@@ -270,7 +304,7 @@
       <a href="https://github.com/raygilbert/kindle-sky/blob/main/docs/DATA_AND_LIMITS.md">Data and limits</a>
       <a href="https://github.com/raygilbert/kindle-sky/blob/main/LICENSE">MIT licence</a>
     </nav>
-    <p class="colophon">Aircraft from adsb.fi, satellites from CelesTrak, rail from SEPTA and TfL. Kindle Horizon is an independent plugin and is not part of KOReader.</p>
+    <p class="colophon">Aircraft from adsb.fi, airline and route from adsbdb.com, satellites from CelesTrak, rail from SEPTA and TfL. Kindle Horizon is an independent plugin and is not part of KOReader.</p>
   </div>
 </footer>
 
