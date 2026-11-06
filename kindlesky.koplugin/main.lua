@@ -1331,6 +1331,7 @@ function Sky:rotateView()
     end
     if self.mode ~= previous_mode then
         self:flapCancel()
+        if self.mode ~= "capture" then self:capCancel() end
         self:wantLookup()
         self.rotation_count = (self.rotation_count or 0) + 1
         if self.dashboard then
