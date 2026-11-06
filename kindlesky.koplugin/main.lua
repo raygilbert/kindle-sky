@@ -745,7 +745,8 @@ function Dashboard:paintCapture(bb)
     text(bb, result.new_reg and "NEW REGISTRATION" or string.format("THIS PLANE SEEN %d TIMES", result.reg_count),
         x, y + 108, 19, w, result.new_reg)
     local totals = Logbook.totals(app.logbook)
-    text(bb, string.format("LOGBOOK  %d TYPES  /  %d PLANES", totals.types, totals.planes), x, y + 152, 17, w)
+    text(bb, string.format("LOGBOOK  %d %s  /  %d %s", totals.types, totals.types == 1 and "TYPE" or "TYPES",
+        totals.planes, totals.planes == 1 and "PLANE" or "PLANES"), x, y + 152, 17, w)
     if cap.save_failed then text(bb, "Could not save the logbook", x, y + 184, 17, w, true) end
 end
 
