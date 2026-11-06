@@ -43,7 +43,15 @@ function Splitflap.build(spec, rows)
                 cells[c] = s:sub(i, i) ~= "" and s:sub(i, i) or " "
             end
         end
-        board.rows[r] = { cells = cells, used = used, outline = used and item.outline == true or false }
+        -- outline: true outlines the last field; a field key outlines that field.
+        local outline_field
+        if used and item.outline then
+            outline_field = #spec.fields
+            if type(item.outline) == "string" then
+                for fi, f in ipairs(spec.fields) do if f.key == item.outline then outline_field = fi end end
+            end
+        end
+        board.rows[r] = { cells = cells, used = used, outline = outline_field ~= nil, outline_field = outline_field }
     end
     return board
 end
@@ -83,6 +91,7 @@ end
 function Splitflap.plan(changes, opts)
     opts = opts or {}
     local max_steps, max_rows, max_frames = opts.max_steps or 3, opts.max_rows or 4, opts.max_frames or 14
+    local col_div = math.max(1, opts.col_div or 6)
     local order, rank = {}, {}
     for _, ch in ipairs(changes) do
         if not rank[ch.row] then order[#order + 1] = ch.row; rank[ch.row] = 0 end
@@ -96,7 +105,7 @@ function Splitflap.plan(changes, opts)
             cell = { row = ch.row, col = ch.col, from = ch.from, seq = { ch.to }, start = 0 }
         else
             local seq = Splitflap.sequence(ch.from, ch.to, max_steps)
-            local start = (rank[ch.row] - 1) * 2 + math.floor((ch.col - 1) / 6)
+            local start = (rank[ch.row] - 1) * 2 + math.floor((ch.col - 1) / col_div)
             start = math.max(0, math.min(start, max_frames - #seq))
             cell = { row = ch.row, col = ch.col, from = ch.from, seq = seq, start = start }
         end
@@ -249,9 +258,17 @@ function Splitflap.paint(ctx, board, geom, anim, k)
             local y = geom.y0 + (r - 1) * geom.row_pitch
             for c = 1, spec.cols do
                 local g, prev, flipping = Splitflap.cellAt(anim, board, r, c, k or 0)
-                paintCell(ctx, geom, Splitflap.cellX(spec, geom, c), y, g, prev, flipping, not row.outline or spec.field_of[c] ~= spec.field_of[spec.cols])
+                paintCell(ctx, geom, Splitflap.cellX(spec, geom, c), y, g, prev, flipping, spec.field_of[c] ~= row.outline_field)
             end
         end
+    end
+end
+
+-- A loose string of tiles (labels, buttons, route codes). Not tied to a board spec.
+function Splitflap.paintString(ctx, geom, x, y, s, dark)
+    for i = 1, #s do
+        local ch = s:sub(i, i)
+        paintCell(ctx, geom, x + (i - 1) * geom.pitch, y, ch, ch, false, dark)
     end
 end
 
