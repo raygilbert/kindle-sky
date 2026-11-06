@@ -209,6 +209,7 @@ function Dashboard:init()
     self.ges_events = {
         SwitchView = { GestureRange:new { ges = "tap", range = whole } },
         CloseView = { GestureRange:new { ges = "hold", range = whole } },
+        DemoFlip = { GestureRange:new { ges = "double_tap", range = whole } },
     }
 end
 
@@ -216,9 +217,18 @@ local function inRect(r, px, py)
     return r and px >= r.x and px <= r.x + r.w and py >= r.y and py <= r.y + r.h
 end
 
+-- Some KOReader setups report two quick taps as one double_tap gesture; both routes end up here.
+function Dashboard:onDemoFlip()
+    local app = self.owner
+    if app.mode ~= "trains" then return false end
+    app:trainsDoubleTap()
+    return true
+end
+
 function Dashboard:onSwitchView(_, ges)
     local app = self.owner
     local px, py = ges and ges.pos and ges.pos.x or 0, ges and ges.pos and ges.pos.y or 0
+    if app.mode == "trains" then return app:trainsTap() end
     local nearest, best = nil, 20 * 20
     if app.mode ~= "satellites" then
         for _, dot in ipairs(self.radar_dots or {}) do
@@ -339,7 +349,8 @@ function Dashboard:paintContent(bb, x, y)
         or (app.mode == "aircraft" and "Left: next  Right: satellites  Top: home  Bottom: logbook"
         or (app.mode == "capture" and "Tap: back   Hold: exit"
         or (app.mode == "logbook" and "Right: next page  Left: previous  Top: back"
-        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit" or "Tap: home   Hold: exit"))))
+        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit"
+        or (app.mode == "trains" and "Tap: home   Double-tap: test the flip   Hold: exit" or "Tap: home   Hold: exit")))))
     text(bb, hint, 24, H - 33, 16)
 end
 
@@ -904,6 +915,8 @@ function Sky:init()
     self.rotate_task = guarded("rotate", function() self:rotateView() end,
         function() self:scheduleRotation() end)
     self.flap.task = guarded("flip", function() self:flapStep() end, function() self:flapFail() end)
+    self.flap.demo_task = guarded("flip demo", function() self:flapDemoRestore() end, function() self:flapFail() end)
+    self.tap_task = guarded("tap", function() self:trainsTapExpired() end, function() self.tap_pending = false end)
     self.ui.menu:registerToMainMenu(self)
 end
 
@@ -911,7 +924,10 @@ end
 function Sky:flapCancel()
     local flap = self.flap
     UIManager:unschedule(flap.task)
+    UIManager:unschedule(flap.demo_task)
     flap.anim, flap.k = nil, 0
+    -- Leaving a test flip puts the real board back.
+    if flap.demo then flap.board, flap.demo = flap.demo.real, nil end
 end
 
 function Sky:flapFail()
@@ -952,21 +968,103 @@ function Sky:flapBoard()
     return self.flap.board
 end
 
-function Sky:flapStart(old, board)
+function Sky:flapStart(old, board, force)
     local flap = self.flap
     local changes = Splitflap.diff(old, board)
     if not changes or #changes == 0 then return end
-    local opts = self.settings.flap_mode == "full" and { max_steps = 4, max_rows = 5, max_frames = 14 }
+    local opts = (self.settings.flap_mode == "full") and { max_steps = 4, max_rows = 5, max_frames = 14 }
         or { max_steps = 2, max_rows = 3, max_frames = 10 }
     local anim = Splitflap.plan(changes, opts)
     local now = os.time()
     if now - flap.hour_start >= 3600 then flap.hour_start, flap.hour_frames = now, 0 end
-    if flap.hour_frames + anim.frames + 1 > FLAP_FRAMES_PER_HOUR then return end
+    if not force and flap.hour_frames + anim.frames + 1 > FLAP_FRAMES_PER_HOUR then return end
     local info = memory_info()
     if info.available_kb and info.available_kb < LOW_MEMORY_KB then return end
-    flap.hour_frames = flap.hour_frames + anim.frames + 1
+    if not force then flap.hour_frames = flap.hour_frames + anim.frames + 1 end
     flap.anim, flap.k = anim, 0
     UIManager:scheduleIn(self.settings.flap_ms / 1000, flap.task)
+end
+
+-- ---------- Test flip (double tap on the train board) ----------
+local DOUBLE_TAP_S = 0.7
+local DEMO_HOLD_S = 3
+
+-- Same trains with their destinations passed along one row and the times nudged, so many cells change.
+local function demoTrains(trains)
+    local out, n = {}, #trains
+    for i, t in ipairs(trains) do
+        local copy = {}
+        for k, v in pairs(t) do copy[k] = v end
+        local other = trains[i % n + 1]
+        if n > 1 then copy.destination = other.destination end
+        if copy.minutes then copy.minutes = copy.minutes + 3 end
+        if copy.number then copy.delay = ((copy.delay or 0) > 0) and 0 or (4 + 3 * i) end
+        out[i] = copy
+    end
+    return out
+end
+
+function Sky:flapDemo()
+    local flap = self.flap
+    if flap.demo then return end
+    if flap.disabled then
+        UIManager:show(InfoMessage:new { text = _("The flip display was switched off after an error. Restart the view to try again."), timeout = 4 })
+        return
+    end
+    self:flapSync(false)
+    local board = flap.board
+    if not board or not self.trains or #self.trains == 0 then
+        UIManager:show(InfoMessage:new { text = _("No trains on the board to flip right now."), timeout = 3 })
+        return
+    end
+    local demo = Splitflap.boardFor(self.train_provider, W > H, demoTrains(self.trains), nil, Visuals.lineBadge)
+    self:flapCancel()
+    flap.demo = { real = board }
+    flap.board = demo
+    self:flapStart(board, demo, true)
+    local run = (flap.anim and flap.anim.frames or 0) * self.settings.flap_ms / 1000
+    UIManager:scheduleIn(run + DEMO_HOLD_S, flap.demo_task)
+    self:scheduleRotation()
+    UIManager:setDirty(self.dashboard, "ui")
+end
+
+function Sky:flapDemoRestore()
+    local flap = self.flap
+    if not flap.demo then return end
+    if not self.running or not self.dashboard or self.mode ~= "trains" then
+        self:flapCancel()
+        return
+    end
+    local shown = flap.board
+    UIManager:unschedule(flap.task)
+    flap.anim, flap.k = nil, 0
+    flap.board, flap.demo = flap.demo.real, nil
+    self:flapStart(shown, flap.board, true)
+    UIManager:setDirty(self.dashboard, "ui")
+end
+
+-- One tap goes home after a short wait; a second tap inside the wait runs the test flip instead.
+function Sky:trainsTap()
+    if self.tap_pending then return self:trainsDoubleTap() end
+    self.tap_pending = true
+    UIManager:scheduleIn(DOUBLE_TAP_S, self.tap_task)
+    return true
+end
+
+function Sky:trainsDoubleTap()
+    self.tap_pending = false
+    UIManager:unschedule(self.tap_task)
+    self:flapDemo()
+    return true
+end
+
+function Sky:trainsTapExpired()
+    self.tap_pending = false
+    if not self.running or not self.dashboard or self.mode ~= "trains" then return end
+    self.mode = "home"
+    self:flapCancel()
+    self:scheduleRotation()
+    UIManager:setDirty(self.dashboard, "full")
 end
 
 function Sky:flapRegion(anim)
@@ -1233,6 +1331,7 @@ function Sky:rotateView()
     end
     if self.mode ~= previous_mode then
         self:flapCancel()
+        if self.mode ~= "capture" then self:capCancel() end
         self:wantLookup()
         self.rotation_count = (self.rotation_count or 0) + 1
         if self.dashboard then
@@ -1279,6 +1378,8 @@ function Sky:stop()
     self.lookup.pending = false
     self:capCancel()
     self.cap = nil
+    UIManager:unschedule(self.tap_task)
+    self.tap_pending = false
     self:flapCancel()
     flapCacheFree(self.flap)
     self.flap.board, self.flap.keys, self.flap.source, self.flap.layout = nil, nil, nil, nil
@@ -1452,6 +1553,8 @@ function Sky:onSuspend()
     UIManager:unschedule(self.lookup.task)
     self.lookup.pending = false
     self:capCancel()
+    UIManager:unschedule(self.tap_task)
+    self.tap_pending = false
     self:flapCancel()
 end
 
