@@ -30,6 +30,7 @@ local Trains = dofile(plugin_dir .. "trains.lua")
 local Satellites = dofile(plugin_dir .. "satellites.lua")
 local Logbook = dofile(plugin_dir .. "logbook.lua")
 local Lookup = dofile(plugin_dir .. "lookup.lua")
+local Weather = dofile(plugin_dir .. "weather.lua")
 local W, H = Screen:getWidth(), Screen:getHeight()
 local BLACK, WHITE, GRAY = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_DARK_GRAY
 
@@ -123,6 +124,15 @@ local function text(bb, value, x, y, size, max_width, bold, color)
         fgcolor = color,
     }
     widget:paintTo(bb, x, y)
+    widget:free()
+end
+
+-- Text centred on cx.
+local function ctext(bb, value, cx, y, size, bold)
+    local widget = TextWidget:new { text = tostring(value or ""), face = Font:getFace("cfont", size),
+        max_width = 120, bold = bold or false }
+    local box = widget:getSize()
+    widget:paintTo(bb, cx - math.floor(box.w / 2), y)
     widget:free()
 end
 
@@ -271,8 +281,8 @@ function Dashboard:onSwitchView(_, ges)
         else
             app.logbook_page = ((app.logbook_page or 1) - 2) % pages + 1
         end
-    elseif app.mode == "satellites" and app.train_provider then
-        app.mode = "trains"
+    elseif app.mode == "satellites" then
+        app.mode = app:modeAfter("satellites")
     else
         app.mode = "home"
     end
@@ -308,7 +318,7 @@ end
 local CAP_SPEC = Splitflap.spec({ { key = "t", cells = 12, label = "" } }, 3, 0)
 
 local MODE_NAMES = { home = "AT A GLANCE", aircraft = "AIRCRAFT", satellites = "SATELLITES", trains = "TRAINS",
-    capture = "CAPTURED", logbook = "LOGBOOK" }
+    capture = "CAPTURED", logbook = "LOGBOOK", weather = "WEATHER" }
 
 function Dashboard:paintContent(bb, x, y)
     local app = self.owner
@@ -321,6 +331,9 @@ function Dashboard:paintContent(bb, x, y)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
     local satellite_status = (app.satellite_error and "STALE " or "") .. age(app.catalog_updated_at)
     local train_status = app.train_provider and ("  RAIL " .. (app.train_error and "STALE " or "") .. age(app.train_updated_at)) or ""
+    if app:weatherOn() then
+        train_status = train_status .. "  WX " .. (app.weather_error and "STALE " or "") .. age(app.weather_updated_at)
+    end
     text(bb, "AIR " .. air_status .. "  SAT " .. satellite_status .. train_status,
         W > H and 418 or 285, 75, 15, W > H and 360 or 310)
     rule(bb, 103)
@@ -335,6 +348,8 @@ function Dashboard:paintContent(bb, x, y)
         self:paintCapture(bb)
     elseif app.mode == "logbook" then
         self:paintLogbook(bb)
+    elseif app.mode == "weather" then
+        self:paintWeather(bb)
     else
         self:paintSatellites(bb)
     end
@@ -343,13 +358,14 @@ function Dashboard:paintContent(bb, x, y)
         or (app.mode == "aircraft" and "adsb.fi / adsbdb.com (routes are schedule data)" or
         (app.mode == "trains" and (app.train_provider == "septa" and "SEPTA Regional Rail API" or "Transport for London API")
         or ((app.mode == "capture" or app.mode == "logbook") and "Saved on this Kindle"
-        or "CelesTrak GP / approximate sky positions")))
+        or (app.mode == "weather" and "Weather data by Open-Meteo.com (CC BY 4.0)"
+        or "CelesTrak GP / approximate sky positions"))))
     text(bb, source, 24, H - 58, 15)
     local hint = app.mode == "home" and "Tap radar: aircraft   Tap satellite: sky   Hold: exit"
         or (app.mode == "aircraft" and "Left: next  Right: satellites  Top: home  Bottom: logbook"
         or (app.mode == "capture" and "Tap: back   Hold: exit"
         or (app.mode == "logbook" and "Right: next page  Left: previous  Top: back"
-        or (app.mode == "satellites" and app.train_provider and "Tap: trains   Hold: exit"
+        or (app.mode == "satellites" and app:modeAfter("satellites") ~= "home" and "Tap: next view   Hold: exit"
         or (app.mode == "trains" and "Tap: home   Double-tap: test the flip   Hold: exit" or "Tap: home   Hold: exit")))))
     text(bb, hint, 24, H - 33, 16)
 end
@@ -712,6 +728,135 @@ function Dashboard:paintAircraftLandscape(bb)
     self:paintRadar(bb, ac, 592, 425, 64, app.settings.radius_nm, app.selected_index or 1)
 end
 
+-- ---------- Weather screen ----------
+local function disc(bb, cx, cy, r, color)
+    r = math.max(1, math.floor(r))
+    for dy = -r, r do
+        local dx = math.floor(math.sqrt(r * r - dy * dy))
+        bb:paintRect(cx - dx, cy + dy, 2 * dx + 1, 1, color)
+    end
+end
+
+local function paintCloud(bb, cx, cy, s, color)
+    disc(bb, cx - s * 0.20, cy + s * 0.06, s * 0.19, color)
+    disc(bb, cx - s * 0.02, cy - s * 0.10, s * 0.27, color)
+    disc(bb, cx + s * 0.24, cy + s * 0.06, s * 0.21, color)
+    bb:paintRect(math.floor(cx - s * 0.20), math.floor(cy + s * 0.06), math.floor(s * 0.44), math.floor(s * 0.21), color)
+end
+
+local function paintSun(bb, cx, cy, s)
+    local r = s * 0.2
+    disc(bb, cx, cy, r, BLACK)
+    for k = 0, 7 do
+        local a = math.rad(k * 45)
+        local thick = math.max(2, math.floor(s / 22))
+        for t = 0, 1, 0.1 do
+            local d = r * 1.5 + (s * 0.46 - r * 1.5) * t
+            bb:paintRect(math.floor(cx + d * math.cos(a)), math.floor(cy + d * math.sin(a)), thick, thick, BLACK)
+        end
+    end
+end
+
+-- Weather icons drawn from rectangles and discs, centred on (cx, cy) inside an s by s box.
+local function paintWeatherIcon(bb, kind, cx, cy, s)
+    local w = math.max(2, math.floor(s / 16))
+    if kind == "sun" then
+        paintSun(bb, cx, cy, s)
+    elseif kind == "moon" then
+        disc(bb, cx, cy, s * 0.30, BLACK)
+        disc(bb, cx + s * 0.16, cy - s * 0.10, s * 0.26, WHITE)
+    elseif kind == "part" then
+        paintSun(bb, cx - s * 0.16, cy - s * 0.14, s * 0.62)
+        paintCloud(bb, cx + s * 0.10, cy + s * 0.14, s * 1.04, WHITE)
+        paintCloud(bb, cx + s * 0.10, cy + s * 0.14, s * 0.9, BLACK)
+    elseif kind == "fog" then
+        for i = -1, 1 do
+            bb:paintRect(math.floor(cx - s * 0.38 + (i == 0 and s * 0.1 or 0)), math.floor(cy + i * s * 0.22 - w), math.floor(s * 0.7), w * 2, BLACK)
+        end
+    else
+        paintCloud(bb, cx, cy - s * 0.2, s * 0.95, BLACK)
+        local y0, y1 = cy + s * 0.14, cy + s * 0.44
+        if kind == "rain" then
+            for i = -1, 1 do line(bb, cx + i * s * 0.2 + 3, y0, cx + i * s * 0.2 - 3, y1, BLACK) end
+        elseif kind == "snow" then
+            for i = -1, 1 do disc(bb, cx + i * s * 0.22, y0 + (i == 0 and s * 0.2 or s * 0.08), math.max(2, s * 0.05), BLACK) end
+        elseif kind == "storm" then
+            line(bb, cx + 4, y0 - 4, cx - 4, y0 + s * 0.12, BLACK)
+            line(bb, cx - 4, y0 + s * 0.12, cx + 6, y0 + s * 0.12, BLACK)
+            line(bb, cx + 6, y0 + s * 0.12, cx - 2, y1 + 2, BLACK)
+        end
+    end
+end
+
+local function paintPopBar(bb, cx, y, w, pct)
+    bb:paintRect(cx - math.floor(w / 2), y, w, 8, BLACK)
+    bb:paintRect(cx - math.floor(w / 2) + 2, y + 2, w - 4, 4, WHITE)
+    local fill = math.floor((w - 4) * math.max(0, math.min(100, pct)) / 100)
+    if fill > 0 then bb:paintRect(cx - math.floor(w / 2) + 2, y + 2, fill, 4, BLACK) end
+end
+
+function Dashboard:paintWeather(bb)
+    local app = self.owner
+    local wx = app.weather
+    local wide = W > H
+    if not wx then
+        text(bb, "WEATHER", 24, 118, 24, W - 48, true)
+        text(bb, app.weather_error and ("Unavailable: " .. app.weather_error) or "Waiting for weather data", 24, 168, 22, W - 48)
+        return
+    end
+    local u = wx.units
+    local deg = "\194\176"
+    local now = wx.now
+    text(bb, string.format("NOW  /  %.2f, %.2f", app.settings.lat, app.settings.lon), 24, 116, 18, W - 48, true)
+    paintWeatherIcon(bb, now.icon, 80, wide and 192 or 195, 100)
+    text(bb, now.temp .. deg, 150, wide and 134 or 136, 84, 280, true)
+    text(bb, now.text, 150, wide and 228 or 230, 20, wide and 270 or 420, true)
+    local feels = now.feels and ("Feels like " .. now.feels .. deg .. "  /  ") or ""
+    text(bb, feels .. "H " .. (wx.hi or "--") .. deg .. "  L " .. (wx.lo or "--") .. deg, 24, wide and 262 or 270, 15, wide and 380 or 500)
+
+    local rows = {
+        { "Wind", now.wind and ((now.dir and (now.dir .. " ") or "") .. now.wind .. " " .. Weather.speedUnit(u)
+            .. ((now.gust and now.gust > now.wind) and (", gusts " .. now.gust) or "")) or "--" },
+        { "Humidity", now.humidity and (now.humidity .. "%") or "--" },
+        { "Rain, next hour", wx.rain_next and (wx.rain_next .. "%") or "--" },
+        { "Sunrise / Sunset", (wx.sunrise and wx.sunset) and (wx.sunrise .. " / " .. wx.sunset) or "--" },
+        { "Pressure", now.pressure and (now.pressure .. " " .. Weather.pressureUnit(u)) or "--" },
+    }
+    local rx, vx, ry, pitch = wide and 430 or 24, wide and 580 or 300, wide and 122 or 304, wide and 30 or 26
+    for i, row in ipairs(rows) do
+        text(bb, row[1], rx, ry + (i - 1) * pitch, 16, vx - rx - 6)
+        text(bb, row[2], vx, ry + (i - 1) * pitch, 16, W - vx - 24, true)
+    end
+
+    local function thin(y) bb:paintRect(24, y, W - 48, 1, BLACK) end
+    local hours_n = wide and Weather.HOURS or 6
+    local top = wide and 296 or 440
+    thin(top)
+    text(bb, "NEXT " .. hours_n .. " HOURS", 24, top + 10, 14, W - 48, true)
+    local pitch_x = (W - 48) / hours_n
+    for i = 1, math.min(hours_n, #wx.hours) do
+        local h = wx.hours[i]
+        local cx = math.floor(24 + (i - 0.5) * pitch_x)
+        ctext(bb, h.label, cx, top + 26, 13)
+        paintWeatherIcon(bb, h.icon, cx, top + 60, 34)
+        ctext(bb, h.temp .. deg, cx, top + 80, 17, true)
+        if h.pop then
+            paintPopBar(bb, cx, top + 103, 60, h.pop)
+            ctext(bb, h.pop .. "%", cx, top + 113, 11)
+        end
+    end
+    local dtop = wide and 430 or 572
+    thin(dtop)
+    text(bb, "NEXT " .. #wx.days .. " DAYS", 24, dtop + 8, 14, W - 48, true)
+    for i, d in ipairs(wx.days) do
+        local x, y
+        if wide then x, y = 24 + (i - 1) * 254, dtop + 28 else x, y = 24, dtop + 28 + (i - 1) * 44 end
+        paintWeatherIcon(bb, d.icon, x + 22, y + 20, wide and 44 or 32)
+        text(bb, d.name .. "  " .. d.hi .. deg .. " / " .. d.lo .. deg, x + 58, y, 17, 190, true)
+        text(bb, d.text .. (d.pop and ("  " .. d.pop .. "%") or ""), x + 58, y + 22, 13, 190)
+    end
+end
+
 -- ---------- Capture and logbook screens ----------
 local CAP_GEOM = { x0 = 24, y0 = 150, pitch = 30, cw = 27, ch = 48, row_pitch = 60, font = 32 }
 
@@ -900,6 +1045,8 @@ function Sky:init()
     if mode ~= "off" and mode ~= "subtle" and mode ~= "full" then self.settings.flap_mode = "subtle" end
     local ms = tonumber(self.settings.flap_ms)
     self.settings.flap_ms = (ms and ms >= 250 and ms <= 1000) and math.floor(ms) or 350
+    local units = self.settings.weather_units
+    if units ~= "us" and units ~= "metric" then self.settings.weather_units = "auto" end
     self.flap = { use_cache = true, k = 0, hour_start = 0, hour_frames = 0, sequences = 0 }
     self.logbook_file = LuaSettings:open(DataStorage:getSettingsDir() .. "/kindlesky_logbook.lua")
     self.logbook = Logbook.sanitize(self.logbook_file:readSetting("logbook"), os.time())
@@ -1300,6 +1447,18 @@ function Sky:setKeepAwake(enabled)
     end
 end
 
+function Sky:weatherOn()
+    return self.settings.weather ~= false
+end
+
+-- The view that follows this one in the cycle: satellites, trains (where a provider exists),
+-- weather (when switched on), then home.
+function Sky:modeAfter(mode)
+    if mode == "satellites" and self.train_provider then return "trains" end
+    if (mode == "satellites" or mode == "trains") and self:weatherOn() then return "weather" end
+    return "home"
+end
+
 function Sky:scheduleRotation()
     UIManager:unschedule(self.rotate_task)
     if self.running and self.settings.auto_rotate then
@@ -1325,8 +1484,8 @@ function Sky:rotateView()
         end
     elseif self.mode == "aircraft" then
         self.mode = "satellites"
-    elseif self.mode == "satellites" and self.train_provider then
-        self.mode = "trains"
+    elseif self.mode == "satellites" or self.mode == "trains" then
+        self.mode = self:modeAfter(self.mode)
     else
         self.mode = "home"
     end
@@ -1537,6 +1696,11 @@ function Sky:refreshData()
     if self.train_error and (not self.train_updated_at or os.time() - self.train_updated_at > 600) then
         self.trains = nil
     end
+    local weathered, weather_failure = pcall(function() self:refreshWeather() end)
+    if not weathered then
+        diag("weather error", weather_failure)
+        self.weather_error = "Weather update failed"
+    end
     local synced, sync_error = pcall(function() self:flapSync(true) end)
     if not synced then
         diag("board update error", sync_error)
@@ -1545,6 +1709,25 @@ function Sky:refreshData()
     self.refresh_count = (self.refresh_count or 0) + 1
     if self.dashboard then UIManager:setDirty(self.dashboard, self.refresh_count % 30 == 0 and "full" or "ui") end
     self:wantLookup()
+end
+
+-- Weather is asked for at most every 30 minutes (5 after a failure). Only the coordinates are sent.
+function Sky:refreshWeather()
+    if not self:weatherOn() then return end
+    local now = os.time()
+    local wait = self.weather_error and Weather.RETRY or Weather.TTL
+    if self.weather_checked_at and now - self.weather_checked_at < wait then return end
+    self.weather_checked_at = now
+    local units = Weather.units(self.settings.weather_units, self.settings.lat, self.settings.lon)
+    local response, request_error = get_json(Weather.url(self.settings.lat, self.settings.lon, units))
+    local parsed, parse_error
+    if response then parsed, parse_error = Weather.parse(response, units) end
+    if parsed then
+        self.weather, self.weather_updated_at, self.weather_error = parsed, now, nil
+    else
+        self.weather_error = request_error or parse_error or "Weather unavailable"
+        if not self.weather_updated_at or now - self.weather_updated_at > Weather.STALE then self.weather = nil end
+    end
 end
 
 function Sky:onSuspend()
@@ -1596,7 +1779,10 @@ function Sky:configure()
                     refresh_seconds = math.floor(interval), landscape = self.settings.landscape,
                     auto_rotate = self.settings.auto_rotate, timezone = self.settings.timezone,
                     flap_mode = self.settings.flap_mode, flap_ms = self.settings.flap_ms,
-                    lookup = self.settings.lookup }
+                    lookup = self.settings.lookup, weather = self.settings.weather,
+                    weather_units = self.settings.weather_units }
+                self.weather, self.weather_updated_at, self.weather_checked_at, self.weather_error = nil, nil, nil, nil
+                if self.mode == "weather" then self.mode = "home" end
                 self.train_provider = Trains.provider(lat, lon)
                 self.train_stop, self.train_stop_checked_at = nil, nil
                 self.trains, self.train_updated_at = nil, nil
@@ -1669,6 +1855,31 @@ function Sky:addToMainMenu(menu_items)
                   if self.dashboard then UIManager:setDirty(self.dashboard, "ui") end
                   self:wantLookup()
               end },
+            { text = _("Show weather"), callback = function()
+                  if not self.running then self:start() end
+                  self.settings.weather = true
+                  self:saveSettings()
+                  self.weather_checked_at = nil
+                  self.mode = "weather"
+                  self:scheduleRotation()
+                  if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+                  self.refresh_task()
+              end },
+            { text = _("Weather in the view cycle (Open-Meteo)"), checked_func = function() return self:weatherOn() end,
+              callback = function()
+                  self.settings.weather = not self:weatherOn()
+                  if not self:weatherOn() and self.mode == "weather" then self.mode = "home" end
+                  self:saveSettings()
+                  if self.dashboard then UIManager:setDirty(self.dashboard, "full") end
+              end },
+            { text = _("Weather units"), sub_item_table = {
+                { text = _("By location"), radio = true, checked_func = function() return self.settings.weather_units == "auto" end,
+                  callback = function() self.settings.weather_units = "auto"; self.weather_checked_at = nil; self:saveSettings() end },
+                { text = _("Fahrenheit, mph, inHg"), radio = true, checked_func = function() return self.settings.weather_units == "us" end,
+                  callback = function() self.settings.weather_units = "us"; self.weather_checked_at = nil; self:saveSettings() end },
+                { text = _("Celsius, km/h, hPa"), radio = true, checked_func = function() return self.settings.weather_units == "metric" end,
+                  callback = function() self.settings.weather_units = "metric"; self.weather_checked_at = nil; self:saveSettings() end },
+            } },
             { text = _("Reset logbook"), callback = function()
                   UIManager:show(ConfirmBox:new {
                       text = _("Erase every captured aircraft type and registration? This cannot be undone."),

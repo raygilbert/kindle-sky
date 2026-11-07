@@ -3,7 +3,7 @@ import os, sys
 from lupa.luajit21 import LuaRuntime
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 failed = False
-for name in ("splitflap_test.lua", "logbook_test.lua"):
+for name in ("splitflap_test.lua", "logbook_test.lua", "weather_test.lua"):
     lua = LuaRuntime(unpack_returned_tuples=True)
     src = open(os.path.join(root, "tests", name)).read()
     run = lua.eval("function(src, root, name) return load(src, '@' .. name)(root) end")
