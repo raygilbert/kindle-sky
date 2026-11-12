@@ -366,7 +366,7 @@ function Dashboard:paintContent(bb, x, y)
         or (app.mode == "capture" and "Tap: back   Hold: exit"
         or (app.mode == "logbook" and "Right: next page  Left: previous  Top: back"
         or (app.mode == "satellites" and app:modeAfter("satellites") ~= "home" and "Tap: next view   Hold: exit"
-        or (app.mode == "trains" and "Tap: home   Double-tap: test the flip   Hold: exit" or "Tap: home   Hold: exit")))))
+        or (app.mode == "trains" and ("Tap: " .. (app:modeAfter("trains") == "weather" and "weather" or "home") .. "   Double-tap: test the flip   Hold: exit") or "Tap: home   Hold: exit")))))
     text(bb, hint, 24, H - 33, 16)
 end
 
@@ -1209,7 +1209,7 @@ end
 function Sky:trainsTapExpired()
     self.tap_pending = false
     if not self.running or not self.dashboard or self.mode ~= "trains" then return end
-    self.mode = "home"
+    self.mode = self:modeAfter("trains")
     self:flapCancel()
     self:scheduleRotation()
     UIManager:setDirty(self.dashboard, "full")
