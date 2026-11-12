@@ -326,6 +326,10 @@ function Dashboard:paintContent(bb, x, y)
     text(bb, "KINDLE HORIZON", 24, 18, 34, W - 48, true)
     local clock, zone = Time.format(os.time(), "%I:%M %p", app.settings.timezone)
     text(bb, clock:gsub("^0", "") .. " " .. zone, W - 185, 25, 18, 165, true)
+    local wx = app.weather
+    if wx and wx.now and wx.now.temp and app.mode ~= "weather" and app:weatherOn() then
+        text(bb, wx.now.temp .. "\194\176" .. Weather.tempUnit(wx.units) .. "  " .. (wx.now.text or ""), W - 185, 47, 16, 165)
+    end
     local mode_name = MODE_NAMES[app.mode] or "TRAINS"
     text(bb, "LOCAL  /  " .. mode_name, 24, 68, 20, 350)
     local air_status = (app.aircraft_error and "STALE " or "") .. age(app.aircraft_updated_at)
