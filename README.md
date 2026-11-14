@@ -1,6 +1,6 @@
 # Kindle Horizon
 
-**[Project page](https://raygilbert.github.io/kindle-sky/)** · [Installation](docs/INSTALLATION.md) · [Data and limits](docs/DATA_AND_LIMITS.md)
+**[Project page](https://raygilbert.github.io/kindle-horizon/)** · [Installation](docs/INSTALLATION.md) · [Data and limits](docs/DATA_AND_LIMITS.md)
 
 Kindle Horizon turns a jailbroken Kindle running [KOReader](https://github.com/koreader/koreader) into an e-ink desk display for nearby aircraft, satellites above your saved location, and supported local rail feeds. It runs on the Kindle itself; no companion computer is needed after installation. Wi-Fi is required for live data.
 
